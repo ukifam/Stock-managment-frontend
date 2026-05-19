@@ -1,0 +1,45 @@
+:root {
+  --bg: #020b14;
+  --panel: #0a1f32;
+  --line: rgba(71, 148, 181, 0.36);
+  --cyan: #15f4ff;
+  --danger: #ff6d7a;
+  --text-strong: #e7fbff;
+  --text-soft: #96b7c2;
+  --text-muted: #6d8793;
+  --display: 'Segoe UI', system-ui, sans-serif;
+  --mono: 'Cascadia Mono', 'SFMono-Regular', Consolas, monospace;
+
+  font-family: var(--display);
+  color: var(--text-soft);
+  background: var(--bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: var(--bg);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
