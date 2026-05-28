@@ -6,12 +6,11 @@ type DatedRow = {
 
 export const periodLabels: Record<FilterPeriod, string> = {
   daily: 'Daily',
+  weekly: 'Last 7 Days',
   monthly: 'Monthly',
   quarterly: 'Quarterly',
   yearly: 'Yearly',
 }
-
-const currentReportDate = new Date('2026-05-19T12:00:00')
 
 export function filterByPeriod<T extends DatedRow>(rows: T[], period: FilterPeriod) {
   return rows.filter((row) => isInPeriod(new Date(`${row.date}T12:00:00`), period))
@@ -34,7 +33,7 @@ export function exportRows(filename: string, rows: Record<string, string>[]) {
 }
 
 function isInPeriod(date: Date, period: FilterPeriod) {
-  const now = currentReportDate
+  const now = new Date()
 
   if (period === 'daily') {
     return sameDay(date, now)
@@ -42,6 +41,10 @@ function isInPeriod(date: Date, period: FilterPeriod) {
 
   if (period === 'monthly') {
     return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth()
+  }
+
+  if (period === 'weekly') {
+    return daysBetween(date, now) >= 0 && daysBetween(date, now) < 7
   }
 
   if (period === 'quarterly') {
@@ -57,6 +60,12 @@ function sameDay(left: Date, right: Date) {
 
 function quarter(date: Date) {
   return Math.floor(date.getMonth() / 3)
+}
+
+function daysBetween(left: Date, right: Date) {
+  const start = new Date(left.getFullYear(), left.getMonth(), left.getDate())
+  const end = new Date(right.getFullYear(), right.getMonth(), right.getDate())
+  return Math.floor((end.getTime() - start.getTime()) / 86400000)
 }
 
 function csvCell(value = '') {

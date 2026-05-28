@@ -590,6 +590,12 @@
   min-height: calc(100svh - 46px);
 }
 
+.list-detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 390px;
+  min-height: calc(100svh - 46px);
+}
+
 .inventory-content {
   min-width: 0;
 }
@@ -647,6 +653,14 @@ td {
 tr.selected-row {
   background: var(--table-row);
   box-shadow: inset 3px 0 0 var(--cyan);
+}
+
+tr.clickable-row {
+  cursor: pointer;
+}
+
+tr.clickable-row:hover {
+  background: rgba(21, 244, 255, 0.06);
 }
 
 td strong,
@@ -713,6 +727,11 @@ td span {
   border-bottom: 0;
   padding: 28px 26px;
   overflow-y: auto;
+}
+
+.transaction-detail {
+  background: var(--surface);
+  border-left: 1px solid var(--line);
 }
 
 .detail-head {
@@ -811,6 +830,18 @@ dd {
   margin: 3px 0 0;
 }
 
+.detail-extracted-text {
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid rgba(29, 212, 234, 0.25);
+  background: rgba(3, 12, 20, 0.45);
+  color: var(--text-soft);
+  font: 800 11px/1.55 var(--mono);
+}
+
 .activity {
   list-style: none;
   margin: 0;
@@ -870,10 +901,14 @@ dd {
   padding: 24px;
   background: rgba(0, 9, 16, 0.72);
   backdrop-filter: blur(8px);
+  overflow: auto;
 }
 
 .entry-modal {
   width: min(620px, 100%);
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   display: grid;
   gap: 18px;
   padding: 26px;
@@ -887,7 +922,7 @@ dd {
 }
 
 .scan-entry-modal {
-  width: min(520px, 100%);
+  width: min(650px, 100%);
 }
 
 .scan-preview-card {
@@ -951,6 +986,11 @@ dd {
   justify-content: flex-end;
   gap: 12px;
   padding-top: 6px;
+  position: sticky;
+  bottom: -26px;
+  margin: 0 -26px -26px;
+  padding: 14px 26px 26px;
+  background: linear-gradient(180deg, rgba(7, 27, 43, 0), var(--surface) 22%);
 }
 
 .modal-actions button {
@@ -967,6 +1007,90 @@ dd {
   border: 1px solid rgba(29, 212, 234, 0.45);
   min-height: 34px;
   padding: 0 18px;
+  font: 900 11px var(--mono);
+  text-transform: uppercase;
+}
+
+.camera-scanner {
+  padding: 16px;
+}
+
+.camera-viewfinder {
+  width: min(100%, 520px);
+  aspect-ratio: 4 / 3;
+  min-height: 220px;
+  max-height: min(45vh, 390px);
+  margin: 0 auto;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font: 800 14px var(--mono);
+  position: relative;
+}
+
+.camera-viewfinder.is-ready {
+  display: block;
+}
+
+.camera-viewfinder video,
+.camera-viewfinder canvas,
+.camera-viewfinder img {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover;
+  display: block;
+}
+
+.camera-viewfinder img {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+.camera-viewfinder.has-preview-image video {
+  opacity: 0;
+}
+
+.camera-viewfinder:not(.is-ready) video {
+  opacity: 0;
+  position: absolute;
+  inset: 0;
+}
+
+.take-photo-button {
+  width: min(100%, 520px);
+  min-height: 42px;
+  margin: 12px auto 0;
+  display: block;
+  border: 1px solid rgba(29, 212, 234, 0.45);
+  background: var(--button-bg);
+  color: var(--button-text);
+  padding: 0 16px;
+  font: 900 11px var(--mono);
+  text-transform: uppercase;
+}
+
+.camera-viewfinder > div {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.scan-image-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.scan-image-actions button {
+  min-height: 42px;
+  border: 1px solid rgba(29, 212, 234, 0.45);
+  background: var(--button-bg);
+  color: var(--button-text);
+  padding: 0 16px;
   font: 900 11px var(--mono);
   text-transform: uppercase;
 }
@@ -1641,7 +1765,8 @@ select {
     font-size: 20px;
   }
 
-  .inventory-layout {
+  .inventory-layout,
+  .list-detail-layout {
     grid-template-columns: 1fr;
   }
 

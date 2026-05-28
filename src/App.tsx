@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { EntryFlowModal } from './components/EntryFlowModal'
+import { api, type ManualEntryPayload } from './api'
 import { Sidebar } from './components/Sidebar'
 import { Dashboard } from './pages/Dashboard'
 import { Inventory } from './pages/Inventory'
@@ -13,46 +14,86 @@ import './App.css'
 function App() {
   const [page, setPage] = useState<Page>('dashboard')
   const [theme, setTheme] = useState<Theme>('dark')
+  const [currency, setCurrency] = useState('RWF')
   const [isEntryModalOpen, setIsEntryModalOpen] = useState(false)
+  const [entryModalType, setEntryModalType] = useState<EntryType | undefined>()
   const [entryRequest, setEntryRequest] = useState<{ type: EntryType; mode: EntryMode; id: number } | null>(null)
+  const [listRefreshId, setListRefreshId] = useState(0)
   const isLight = theme === 'light'
+
+  useEffect(() => {
+    api.settings().then((settings) => setCurrency(settings.financial.currency)).catch(() => undefined)
+  }, [])
 
   const toggleTheme = () => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))
 
-  const handleEntrySubmit = (type: EntryType, mode: EntryMode) => {
+  const openEntryModal = (type?: EntryType) => {
+    setEntryModalType(type)
+    setIsEntryModalOpen(true)
+  }
+
+  const closeEntryModal = () => {
     setIsEntryModalOpen(false)
+    setEntryModalType(undefined)
+  }
+
+  const handleEntrySubmit = async (type: EntryType, mode: EntryMode, payload?: ManualEntryPayload) => {
+    if (payload) {
+      try {
+        if (type === 'purchase') {
+          await api.createPurchase(payload)
+        } else {
+          await api.createSale(payload)
+        }
+      } catch (error) {
+        window.alert(error instanceof Error ? error.message : 'Could not save the entry. Please check the backend connection and try again.')
+        return
+      }
+
+      closeEntryModal()
+      setEntryRequest(null)
+      setListRefreshId(Date.now())
+      setPage(type === 'purchase' ? 'purchases' : 'sales')
+      return
+    }
+
+    closeEntryModal()
     setEntryRequest({ type, mode, id: Date.now() })
     setPage(type === 'purchase' ? 'purchases' : 'sales')
   }
 
   return (
     <main className={`shell ${theme}`}>
-      <Sidebar page={page} setPage={setPage} onNewEntry={() => setIsEntryModalOpen(true)} />
+      <Sidebar page={page} setPage={setPage} onNewEntry={() => openEntryModal()} />
       <section className="workspace">
-        {page === 'dashboard' && <Dashboard theme={theme} toggleTheme={toggleTheme} />}
+        {page === 'dashboard' && <Dashboard theme={theme} toggleTheme={toggleTheme} onNewEntry={() => openEntryModal()} />}
         {page === 'inventory' && <Inventory theme={theme} toggleTheme={toggleTheme} />}
         {page === 'purchases' && (
           <Purchases
-            key={`purchase-${entryRequest?.type === 'purchase' ? entryRequest.id : 'list'}`}
+            key={`purchase-${entryRequest?.type === 'purchase' ? entryRequest.id : `list-${listRefreshId}`}`}
             theme={theme}
             toggleTheme={toggleTheme}
             startAdding={entryRequest?.type === 'purchase'}
             entryMode={entryRequest?.type === 'purchase' ? entryRequest.mode : 'scan'}
+            onNewEntry={() => openEntryModal('purchase')}
+            currency={currency}
           />
         )}
         {page === 'sales' && (
           <Sales
-            key={`sale-${entryRequest?.type === 'sale' ? entryRequest.id : 'list'}`}
+            key={`sale-${entryRequest?.type === 'sale' ? entryRequest.id : `list-${listRefreshId}`}`}
             theme={theme}
             toggleTheme={toggleTheme}
             startSelling={entryRequest?.type === 'sale'}
             entryMode={entryRequest?.type === 'sale' ? entryRequest.mode : 'scan'}
+            onNewEntry={() => openEntryModal('sale')}
+            currency={currency}
           />
         )}
         {page === 'reports' && <Reports theme={theme} toggleTheme={toggleTheme} />}
-        {page === 'settings' && <Settings isLight={isLight} toggleTheme={toggleTheme} />}
+        {page === 'settings' && <Settings isLight={isLight} toggleTheme={toggleTheme} onCurrencyChange={setCurrency} />}
       </section>
-      {isEntryModalOpen && <EntryFlowModal onClose={() => setIsEntryModalOpen(false)} onSubmit={handleEntrySubmit} />}
+      {isEntryModalOpen && <EntryFlowModal initialType={entryModalType} currency={currency} onClose={closeEntryModal} onSubmit={handleEntrySubmit} />}
     </main>
   )
 }
