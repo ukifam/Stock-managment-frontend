@@ -1,15 +1,40 @@
-import { useEffect, useState } from 'react'
-import { api, type AvailableItem, type EntryStatus, type SaleRow } from '../api'
+import { useEffect, useRef, useState } from 'react'
+import type React from 'react'
+import { api, type AvailableItem, type EntryStatus, type SaleRow, type SaleUpdatePayload } from '../api'
 import { Topbar } from '../components/Topbar'
+import { ImportHelp } from '../components/ImportHelp'
 import { CameraScanner } from '../components/CameraScanner'
-import type { EntryMode, FilterPeriod, ThemePageProps } from '../types'
-import { exportRows, periodLabels } from '../utils/export'
+import type { EntryMode, ThemePageProps } from '../types'
+
+export const page = { id: 'sales' as const, label: 'Sales', icon: 'tag' }
+import { exportRows } from '../utils/export'
+import { formatMoney } from '../utils/money'
+
+function saleFormFromRow(row?: SaleRow): SaleUpdatePayload {
+  return {
+    date: row?.date ?? '',
+    id: row?.id ?? '',
+    customer: row?.customer ?? '',
+    phone: row?.phone ?? '',
+    item: row?.item ?? '',
+    sku: row?.sku ?? '',
+    category: row?.category ?? '',
+    quantity: row?.rawQuantity != null ? String(row.rawQuantity) : row?.items ?? '1',
+    value: row?.value ?? '',
+    paidAmount: row?.paidAmount ?? '',
+    payment: row?.payment ?? '',
+    status: row?.status ?? '',
+    extractedText: row?.extractedText,
+  }
+}
+import { normalizeCsvRow, parseCsvFile, parseJsonFile } from '../utils/import'
 
 type SalesProps = ThemePageProps & {
   startSelling?: boolean
   entryMode?: EntryMode
   onNewEntry?: () => void
   currency?: string
+  onOpenReport?: () => void
 }
 
 type ScannedItem = {
@@ -19,26 +44,39 @@ type ScannedItem = {
   price: number
 }
 
-export function Sales({ theme, toggleTheme, startSelling = false, entryMode = 'scan', onNewEntry, currency = 'RWF' }: SalesProps) {
+export function Sales({ theme, toggleTheme, startSelling = false, entryMode = 'scan', onNewEntry, currency = 'RWF', onOpenReport }: SalesProps) {
   const [isSelling, setIsSelling] = useState(startSelling)
-  const [period, setPeriod] = useState<FilterPeriod>('daily')
   const [rows, setRows] = useState<SaleRow[]>([])
+  const [filterFrom, setFilterFrom] = useState('')
+  const [filterTo, setFilterTo] = useState('')
+  const [appliedFilterFrom, setAppliedFilterFrom] = useState('')
+  const [appliedFilterTo, setAppliedFilterTo] = useState('')
   const [selectedId, setSelectedId] = useState('')
   const [availableItems, setAvailableItems] = useState<AvailableItem[]>([])
   const [selectedItem, setSelectedItem] = useState<AvailableItem | null>(null)
   const [quantity, setQuantity] = useState(1)
+  const [isEditingSale, setIsEditingSale] = useState(false)
+  const [saleForm, setSaleForm] = useState<SaleUpdatePayload>({ customer: '', item: '', quantity: '1' })
   const [error, setError] = useState('')
   const [scannedItems, setScannedItems] = useState<ScannedItem[]>([])
+  const [importError, setImportError] = useState('')
+  const [isImporting, setIsImporting] = useState(false)
+  const importInputRef = useRef<HTMLInputElement>(null)
   const isManual = entryMode === 'manual'
 
   useEffect(() => {
-    api.sales(period).then((response) => {
+    api.sales(undefined, appliedFilterFrom, appliedFilterTo).then((response) => {
       setRows(response.rows)
       setSelectedId((current) => current || response.rows[0]?.id || '')
     }).catch(() => setRows([]))
-  }, [period])
+  }, [appliedFilterFrom, appliedFilterTo])
 
   const selectedSale = rows.find((row) => row.id === selectedId) ?? rows[0]
+
+  useEffect(() => {
+    setSaleForm(saleFormFromRow(selectedSale))
+    setIsEditingSale(false)
+  }, [selectedSale?.id])
 
   useEffect(() => {
     if (isSelling && isManual) {
@@ -91,9 +129,12 @@ export function Sales({ theme, toggleTheme, startSelling = false, entryMode = 's
   }
 
   const scanTotal = scannedItems.reduce((sum, item) => sum + item.quantity * item.price, 0)
+  const filteredSalesTotal = rows.reduce((sum, row) => sum + Number(row.rawValue ?? row.value ?? 0), 0)
+  const filteredItemsSold = rows.reduce((sum, row) => sum + Number(row.rawQuantity ?? row.items ?? 0), 0)
 
   const handleExport = () => {
-    exportRows(`sales-${period}.csv`, rows.map((row) => ({
+    const suffix = [appliedFilterFrom, appliedFilterTo].filter(Boolean).join('_to_') || 'all'
+    exportRows(`sales-${suffix}.csv`, rows.map((row) => ({
       Date: row.date,
       SaleId: row.id,
       Item: row.item,
@@ -106,6 +147,52 @@ export function Sales({ theme, toggleTheme, startSelling = false, entryMode = 's
     })))
   }
 
+  const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    event.target.value = ''
+    setImportError('')
+    setIsImporting(true)
+
+    try {
+      const rawRows = file.name.toLowerCase().endsWith('.json')
+        ? await parseJsonFile(file)
+        : await parseCsvFile(file)
+
+      const importedRows = Array.isArray(rawRows) ? rawRows : []
+      const payloads = importedRows.map((rawRow) => {
+        const row = normalizeCsvRow(rawRow)
+        return {
+          id: row.saleid || row.id || undefined,
+          item: row.item || row.description || row.product || '',
+          customer: row.customer || row.name || '',
+          phone: row.phone || row.contact || '',
+          sku: row.sku || row.barcode || '',
+          category: row.category || '',
+          quantity: row.quantity || row.qty || row.amount || '1',
+          total: row.total || row.value || '0',
+          payment: row.payment || 'Credit',
+          status: row.status || 'Given',
+        }
+      }).filter((payload) => payload.item && payload.customer)
+
+      if (payloads.length === 0) {
+        setImportError('No valid rows were found in the file.')
+        return
+      }
+
+      const result = await api.bulkImportSales(payloads)
+      const skippedNote = result.skipped ? ` (${result.skipped} skipped)` : ''
+      const failedNote = result.failed ? ` (${result.failed} failed)` : ''
+      await api.sales(undefined, appliedFilterFrom, appliedFilterTo).then((response) => setRows(response.rows)).catch(() => undefined)
+      setImportError(`Imported ${result.count} sales successfully${skippedNote}${failedNote}.`)
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : 'Failed to import file.')
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
   const handleStatusChange = async (id: string, status: EntryStatus) => {
     setRows((current) => current.map((row) => row.id === id ? { ...row, status } : row))
 
@@ -113,9 +200,32 @@ export function Sales({ theme, toggleTheme, startSelling = false, entryMode = 's
       const updated = await api.updateSaleStatus(id, status)
       setRows((current) => current.map((row) => row.id === id ? updated : row))
     } catch {
-      api.sales(period).then((response) => setRows(response.rows)).catch(() => undefined)
+      api.sales(undefined, appliedFilterFrom, appliedFilterTo).then((response) => setRows(response.rows)).catch(() => undefined)
       window.alert('Could not update status. Please try again.')
     }
+  }
+
+  const handleSaleUpdate = async (id: string, payload: SaleUpdatePayload) => {
+    try {
+      const updated = await api.updateSale(id, payload)
+      setRows((current) => current.map((row) => row.id === id ? updated : row))
+      setSelectedId(updated.id)
+      setSaleForm(saleFormFromRow(updated))
+      setIsEditingSale(false)
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Could not update sale.')
+    }
+  }
+
+  const handleSaleFormChange = (field: keyof SaleUpdatePayload, value: string) => {
+    setSaleForm((current) => ({ ...current, [field]: value }))
+  }
+
+  const toggleSaleEditing = () => {
+    if (isEditingSale) {
+      setSaleForm(saleFormFromRow(selectedSale))
+    }
+    setIsEditingSale((current) => !current)
   }
 
   if (!isSelling) {
@@ -126,8 +236,23 @@ export function Sales({ theme, toggleTheme, startSelling = false, entryMode = 's
           <section className="sales-list-page page-pad list-page">
             <div className="inventory-title">
               <div><h1>Sales & Checkout</h1><p>Review orders, carts, and checkout activity before scanning items.</p></div>
-              <div className="toolbar"><PeriodSelect period={period} setPeriod={setPeriod} /><button type="button" onClick={handleExport}>Export</button><button className="primary-action" type="button" onClick={onNewEntry ?? (() => setIsSelling(true))}>New Sale</button></div>
+              <div className="toolbar">
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>From<input type="date" value={filterFrom} onChange={(event) => setFilterFrom(event.target.value)} /></label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>To<input type="date" value={filterTo} onChange={(event) => setFilterTo(event.target.value)} /></label>
+                <button type="button" onClick={() => { setAppliedFilterFrom(filterFrom); setAppliedFilterTo(filterTo) }}>Apply</button>
+                <button type="button" onClick={() => { setFilterFrom(''); setFilterTo(''); setAppliedFilterFrom(''); setAppliedFilterTo('') }}>Clear</button>
+                <button type="button" onClick={handleExport}>Export CSV</button>
+                {onOpenReport && (
+                  <button type="button" onClick={onOpenReport}>Sales Report</button>
+                )}
+                <button type="button" onClick={() => importInputRef.current?.click()} disabled={isImporting}>
+                  {isImporting ? 'Importing…' : 'Import'}
+                </button>
+                <button className="primary-action" type="button" onClick={onNewEntry ?? (() => setIsSelling(true))}>New Sale</button>
+                <input ref={importInputRef} type="file" accept=".csv,.json" hidden onChange={handleImportFile} />
+              </div>
             </div>
+            <ImportHelp kind="sales" />
             <div className="table-frame">
               <table>
                 <thead><tr><th>Date</th><th>Sale ID</th><th>Item Name</th><th>Customer Name</th><th>Phone Number</th><th>Items</th><th>Net Value</th><th>Status</th></tr></thead>
@@ -143,9 +268,31 @@ export function Sales({ theme, toggleTheme, startSelling = false, entryMode = 's
                 </tbody>
               </table>
             </div>
-            <div className="inventory-stats"><div><span>Orders</span><strong>{rows.length}</strong></div><div><span>Given</span><strong>{rows.filter((row) => row.status === 'Given').length}</strong></div><div><span>Returned</span><strong>{rows.filter((row) => row.status === 'Returned').length}</strong></div></div>
+            {importError && (
+              <div style={{ marginTop: '12px', color: importError.startsWith('Imported') ? '#1b5e20' : '#d32f2f' }}>
+                {importError}
+              </div>
+            )}
+            <div className="inventory-stats">
+              <div><span>Orders</span><strong>{rows.length}</strong></div>
+              <div><span>Filtered Total</span><strong>{formatMoney(filteredSalesTotal, currency)}</strong></div>
+              <div><span>Items Sold</span><strong>{filteredItemsSold}</strong></div>
+              <div><span>Given</span><strong>{rows.filter((row) => row.status === 'Given').length}</strong></div>
+              <div><span>Returned</span><strong>{rows.filter((row) => row.status === 'Returned').length}</strong></div>
+            </div>
           </section>
-          <SaleDetailPanel row={selectedSale} />
+          <SaleDetailPanel
+            row={selectedSale}
+            isEditing={isEditingSale}
+            form={saleForm}
+            onEditToggle={toggleSaleEditing}
+            onFieldChange={handleSaleFormChange}
+            onSave={async () => {
+              if (selectedSale) {
+                await handleSaleUpdate(selectedSale.id, saleForm)
+              }
+            }}
+          />
         </div>
       </>
     )
@@ -279,35 +426,102 @@ export function Sales({ theme, toggleTheme, startSelling = false, entryMode = 's
   )
 }
 
-function formatMoney(value: number, currency = 'RWF') {
-  return new Intl.NumberFormat('en-RW', {
-    style: 'currency',
-    currency,
-    maximumFractionDigits: currency === 'RWF' ? 0 : 2,
-  }).format(value)
-}
-
-function SaleDetailPanel({ row }: { row?: SaleRow }) {
+function SaleDetailPanel({
+  row,
+  isEditing,
+  form,
+  onEditToggle,
+  onFieldChange,
+  onSave,
+}: {
+  row?: SaleRow
+  isEditing: boolean
+  form: SaleUpdatePayload
+  onEditToggle: () => void
+  onFieldChange: (field: keyof SaleUpdatePayload, value: string) => void
+  onSave: () => Promise<void>
+}) {
   return (
     <aside className="detail-panel transaction-detail">
       <div className="detail-head"><h2>Sale Details</h2></div>
       <div className="detail-image" />
       <h2>{row?.item ?? 'No sale selected'}</h2>
       <p>Sale ID: {row?.id ?? '-'}</p>
-      <section>
-        <h3>Customer & Payment</h3>
-        <dl>
-          <div><dt>Customer</dt><dd>{row?.customer ?? '-'}</dd></div>
-          <div><dt>Phone</dt><dd>{row?.phone ?? '-'}</dd></div>
-          <div><dt>SKU / Barcode</dt><dd>{row?.sku || '-'}</dd></div>
-          <div><dt>Category</dt><dd>{row?.category || '-'}</dd></div>
-          <div><dt>Items</dt><dd>{row?.items ?? '-'}</dd></div>
-          <div><dt>Net Value</dt><dd>{row?.value ?? '-'}</dd></div>
-          <div><dt>Payment</dt><dd>{row?.payment ?? '-'}</dd></div>
-          <div><dt>Status</dt><dd>{row?.status ?? '-'}</dd></div>
-          <div><dt>Date</dt><dd>{row?.date ?? '-'}</dd></div>
-        </dl>
-      </section>
+      <div className="detail-actions">
+        <button type="button" className="primary" disabled={!row} onClick={onEditToggle}>
+          {isEditing ? 'Cancel Edit' : 'Edit Sale'}
+        </button>
+      </div>
+      {row && isEditing ? (
+        <form onSubmit={async (event) => { event.preventDefault(); await onSave() }}>
+          <div className="field-grid">
+            <label>
+              Customer
+              <input value={form.customer ?? ''} onChange={(event) => onFieldChange('customer', event.target.value)} required />
+            </label>
+            <label>
+              Phone
+              <input value={form.phone ?? ''} onChange={(event) => onFieldChange('phone', event.target.value)} />
+            </label>
+            <label>
+              Item
+              <input value={form.item ?? ''} onChange={(event) => onFieldChange('item', event.target.value)} required />
+            </label>
+            <label>
+              Category
+              <input value={form.category ?? ''} onChange={(event) => onFieldChange('category', event.target.value)} />
+            </label>
+            <label>
+              SKU
+              <input value={form.sku ?? ''} onChange={(event) => onFieldChange('sku', event.target.value)} />
+            </label>
+            <label>
+              Quantity
+              <input type="number" min="0" value={form.quantity ?? ''} onChange={(event) => onFieldChange('quantity', event.target.value)} required />
+            </label>
+            <label>
+              Value
+              <input type="text" value={form.value ?? ''} onChange={(event) => onFieldChange('value', event.target.value)} />
+            </label>
+            <label>
+              Paid Amount
+              <input type="text" value={form.paidAmount ?? ''} onChange={(event) => onFieldChange('paidAmount', event.target.value)} />
+            </label>
+            <label>
+              Payment
+              <input value={form.payment ?? ''} onChange={(event) => onFieldChange('payment', event.target.value)} />
+            </label>
+            <label>
+              Status
+              <input value={form.status ?? ''} onChange={(event) => onFieldChange('status', event.target.value)} />
+            </label>
+            <label>
+              Date
+              <input type="date" value={form.date ?? ''} onChange={(event) => onFieldChange('date', event.target.value)} />
+            </label>
+          </div>
+          <div className="modal-actions" style={{ justifyContent: 'flex-end', marginTop: '18px' }}>
+            <button type="button" onClick={onEditToggle}>Cancel</button>
+            <button className="primary-action" type="submit">Save Sale</button>
+          </div>
+        </form>
+      ) : (
+        <section>
+          <h3>Customer & Payment</h3>
+          <dl>
+            <div><dt>Customer</dt><dd>{row?.customer ?? '-'}</dd></div>
+            <div><dt>Phone</dt><dd>{row?.phone ?? '-'}</dd></div>
+            <div><dt>SKU / Barcode</dt><dd>{row?.sku || '-'}</dd></div>
+            <div><dt>Category</dt><dd>{row?.category ?? '-'}</dd></div>
+            <div><dt>Items</dt><dd>{row?.items ?? '-'}</dd></div>
+            <div><dt>Net Value</dt><dd>{row?.value ?? '-'}</dd></div>
+            <div><dt>Paid Amount</dt><dd>{row?.paidAmount ?? '-'}</dd></div>
+            <div><dt>Payment</dt><dd>{row?.payment ?? '-'}</dd></div>
+            <div><dt>Status</dt><dd>{row?.status ?? '-'}</dd></div>
+            <div><dt>Date</dt><dd>{row?.date ?? '-'}</dd></div>
+          </dl>
+        </section>
+      )}
       {row?.extractedText && <section><h3>Scanned Image Text</h3><pre className="detail-extracted-text">{row.extractedText}</pre></section>}
     </aside>
   )
@@ -324,10 +538,3 @@ function StatusSelect({ value, onChange }: { value: string; onChange: (status: E
   )
 }
 
-function PeriodSelect({ period, setPeriod }: { period: FilterPeriod; setPeriod: (period: FilterPeriod) => void }) {
-  return (
-    <select className="period-select" value={period} onChange={(event) => setPeriod(event.target.value as FilterPeriod)} aria-label="Filter sales period">
-      {Object.entries(periodLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-    </select>
-  )
-}

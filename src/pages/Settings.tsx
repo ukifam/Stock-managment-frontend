@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { api, type SettingsResponse } from '../api'
 import { Topbar } from '../components/Topbar'
 
+export const page = { id: 'settings' as const, label: 'Settings', icon: 'gear' }
+
 type SettingsProps = {
   isLight: boolean
   toggleTheme: () => void

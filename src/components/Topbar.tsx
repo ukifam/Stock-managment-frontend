@@ -5,25 +5,42 @@ type TopbarProps = {
   placeholder?: string
   theme: Theme
   toggleTheme: () => void
+  minimal?: boolean
 }
 
-export function Topbar({ title = 'Core Engine v2.4', placeholder = 'Search operational data...', theme, toggleTheme }: TopbarProps) {
+export function Topbar({
+  title = 'TRI LTD Business Suite',
+  placeholder = 'Search inventory, sales, reports...',
+  theme,
+  toggleTheme,
+  minimal = false,
+}: TopbarProps) {
   return (
-    <header className="topbar">
+    <header className={`topbar${minimal ? ' minimal' : ''}`}>
       <strong className="version">{title}</strong>
-      <label className="search">
-        <span aria-hidden="true" />
-        <input placeholder={placeholder} />
-      </label>
+      {!minimal && (
+        <label className="search">
+          <span aria-hidden="true" />
+          <input placeholder={placeholder} />
+        </label>
+      )}
       <div className="top-actions">
         <button type="button" className="theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
-          {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+          {theme === 'dark' ? 'Light' : 'Dark'}
         </button>
-        <button type="button" className="scan-button">Scan Mode</button>
-        <button type="button" aria-label="Notifications" className="icon-button bell" />
-        <button type="button" aria-label="Help" className="icon-button help" />
-        <button type="button" aria-label="Apps" className="icon-button apps" />
-        <div className="operator" aria-label="System operator"><span>JD</span></div>
+        {!minimal && (
+          <>
+            <button type="button" className="scan-button">
+              Scan
+            </button>
+            <button type="button" aria-label="Notifications" className="icon-button bell" />
+            <button type="button" aria-label="Help" className="icon-button help" />
+            <button type="button" aria-label="Apps" className="icon-button apps" />
+            <div className="operator" aria-label="System operator">
+              <span>JD</span>
+            </div>
+          </>
+        )}
       </div>
     </header>
   )

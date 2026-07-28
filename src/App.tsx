@@ -2,13 +2,8 @@ import { useEffect, useState } from 'react'
 import { EntryFlowModal } from './components/EntryFlowModal'
 import { api, type ManualEntryPayload } from './api'
 import { Sidebar } from './components/Sidebar'
-import { Dashboard } from './pages/Dashboard'
-import { Inventory } from './pages/Inventory'
-import { Purchases } from './pages/Purchases'
-import { Reports } from './pages/Reports'
-import { Sales } from './pages/Sales'
-import { Settings } from './pages/Settings'
-import type { EntryMode, EntryType, Page, Theme } from './types'
+import { pageRegistry } from './pages'
+import type { EntryMode, EntryType, Page, ReportScope, Theme } from './types'
 import './App.css'
 
 function App() {
@@ -19,6 +14,7 @@ function App() {
   const [entryModalType, setEntryModalType] = useState<EntryType | undefined>()
   const [entryRequest, setEntryRequest] = useState<{ type: EntryType; mode: EntryMode; id: number } | null>(null)
   const [listRefreshId, setListRefreshId] = useState(0)
+  const [reportScope, setReportScope] = useState<ReportScope>('all')
   const isLight = theme === 'light'
 
   useEffect(() => {
@@ -63,35 +59,22 @@ function App() {
   }
 
   return (
-    <main className={`shell ${theme}`}>
+    <main className={`shell ${theme} ${page === 'reports' ? 'reports-mode' : ''}`}>
       <Sidebar page={page} setPage={setPage} onNewEntry={() => openEntryModal()} />
       <section className="workspace">
-        {page === 'dashboard' && <Dashboard theme={theme} toggleTheme={toggleTheme} onNewEntry={() => openEntryModal()} />}
-        {page === 'inventory' && <Inventory theme={theme} toggleTheme={toggleTheme} />}
-        {page === 'purchases' && (
-          <Purchases
-            key={`purchase-${entryRequest?.type === 'purchase' ? entryRequest.id : `list-${listRefreshId}`}`}
-            theme={theme}
-            toggleTheme={toggleTheme}
-            startAdding={entryRequest?.type === 'purchase'}
-            entryMode={entryRequest?.type === 'purchase' ? entryRequest.mode : 'scan'}
-            onNewEntry={() => openEntryModal('purchase')}
-            currency={currency}
-          />
-        )}
-        {page === 'sales' && (
-          <Sales
-            key={`sale-${entryRequest?.type === 'sale' ? entryRequest.id : `list-${listRefreshId}`}`}
-            theme={theme}
-            toggleTheme={toggleTheme}
-            startSelling={entryRequest?.type === 'sale'}
-            entryMode={entryRequest?.type === 'sale' ? entryRequest.mode : 'scan'}
-            onNewEntry={() => openEntryModal('sale')}
-            currency={currency}
-          />
-        )}
-        {page === 'reports' && <Reports theme={theme} toggleTheme={toggleTheme} />}
-        {page === 'settings' && <Settings isLight={isLight} toggleTheme={toggleTheme} onCurrencyChange={setCurrency} />}
+        {pageRegistry.find((entry) => entry.id === page)?.render({
+          theme,
+          toggleTheme,
+          openEntryModal,
+          setPage,
+          entryRequest,
+          currency,
+          isLight,
+          onCurrencyChange: setCurrency,
+          listRefreshId,
+          reportScope,
+          setReportScope,
+        })}
       </section>
       {isEntryModalOpen && <EntryFlowModal initialType={entryModalType} currency={currency} onClose={closeEntryModal} onSubmit={handleEntrySubmit} />}
     </main>

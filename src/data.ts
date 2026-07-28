@@ -36,6 +36,7 @@ export const navItems: { id: Page; label: string; icon: string }[] = [
   { id: 'inventory', label: 'Inventory', icon: 'box' },
   { id: 'purchases', label: 'Purchases', icon: 'cart' },
   { id: 'sales', label: 'Sales', icon: 'tag' },
+  { id: 'expenses', label: 'Expenses', icon: 'receipt' },
   { id: 'reports', label: 'Reports', icon: 'doc' },
   { id: 'settings', label: 'Settings', icon: 'gear' },
 ]

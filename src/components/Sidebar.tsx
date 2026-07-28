@@ -1,4 +1,4 @@
-import { navItems } from '../data'
+import { pageRegistry } from '../pages'
 import type { Page } from '../types'
 
 type SidebarProps = {
@@ -11,12 +11,17 @@ export function Sidebar({ page, setPage, onNewEntry }: SidebarProps) {
   return (
     <aside className="sidebar">
       <div className="brand">
-        <strong>QUANTUM AI</strong>
-        <span>Electronics Logistics</span>
+        <div className="brand-mark" aria-hidden="true">
+          T
+        </div>
+        <div className="brand-text">
+          <strong>TRI LTD</strong>
+          <span>Business Suite</span>
+        </div>
       </div>
 
       <nav className="nav">
-        {navItems.map((item) => (
+        {pageRegistry.map((item) => (
           <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => setPage(item.id)} type="button">
             <span className={`nav-icon ${item.icon}`} aria-hidden="true" />
             {item.label}

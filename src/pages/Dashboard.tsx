@@ -4,6 +4,8 @@ import { Topbar } from '../components/Topbar'
 import { api, type DashboardResponse } from '../api'
 import type { ThemePageProps } from '../types'
 
+export const page = { id: 'dashboard' as const, label: 'Dashboard', icon: 'grid' }
+
 type DashboardProps = ThemePageProps & {
   onNewEntry?: () => void
 }

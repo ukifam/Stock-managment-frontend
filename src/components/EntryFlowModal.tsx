@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { createWorker } from 'tesseract.js'
 import type { EntryMode, EntryType } from '../types'
 import { CameraScanner } from './CameraScanner'
+import { formatMoney } from '../utils/money'
 
 type EntryFlowModalProps = {
   initialType?: EntryType
@@ -34,6 +35,8 @@ const emptyScanDetails: ScanDetails = {
   total: '0',
   sku: '',
   extractedText: '',
+  payment: 'Cash',
+  paidAmount: '0',
 }
 
 const barcodeFormats = ['qr_code', 'code_128', 'ean_13', 'ean_8', 'upc_a', 'upc_e']
@@ -274,6 +277,15 @@ function ScanEntryModal({ initialType, currency = 'RWF', onBack, onClose, onSubm
           </label>
         </div>
 
+        <PaymentFields
+          payment={details.payment || 'Cash'}
+          paidAmount={details.paidAmount || '0'}
+          total={Number(details.total) || 0}
+          currency={currency}
+          onPaymentChange={(value) => updateDetails('payment', value)}
+          onPaidAmountChange={(value) => updateDetails('paidAmount', value)}
+        />
+
         <label>Item Search or SKU
           <input value={details.sku} onChange={(event) => updateDetails('sku', event.target.value)} placeholder="Barcode, QR value, or SKU..." />
         </label>
@@ -292,6 +304,8 @@ function ManualEntryModal({ initialType, currency = 'RWF', mode, onBack, onClose
   const [type, setType] = useState<EntryType>(initialType ?? 'purchase')
   const [quantity, setQuantity] = useState(1)
   const [unitPrice, setUnitPrice] = useState(0)
+  const [payment, setPayment] = useState('Cash')
+  const [paidAmount, setPaidAmount] = useState('0')
   const [inventory, setInventory] = useState<InventoryRow[]>([])
   const [selectedInventoryKey, setSelectedInventoryKey] = useState('')
   const isPurchase = type === 'purchase'
@@ -300,7 +314,7 @@ function ManualEntryModal({ initialType, currency = 'RWF', mode, onBack, onClose
   const total = quantity * unitPrice
 
   useEffect(() => {
-    api.inventory('yearly').then((response) => {
+    api.inventory().then((response) => {
       const availableItems = response.rows.filter((item) => item.rawStock > 0)
       setInventory(response.rows)
       setSelectedInventoryKey((current) => current || (availableItems[0] ? inventoryKey(availableItems[0]) : ''))
@@ -343,6 +357,8 @@ function ManualEntryModal({ initialType, currency = 'RWF', mode, onBack, onClose
           unitPrice: String(unitPrice),
           total: String(total),
           sku: saleItem?.sku ?? String(form.get('sku') || ''),
+          payment,
+          paidAmount: payment === 'Credit' ? paidAmount : String(total),
         })
       }}>
         <div className="detail-head">
@@ -406,6 +422,15 @@ function ManualEntryModal({ initialType, currency = 'RWF', mode, onBack, onClose
           </label>
         </div>
 
+        <PaymentFields
+          payment={payment}
+          paidAmount={paidAmount}
+          total={total}
+          currency={currency}
+          onPaymentChange={setPayment}
+          onPaidAmountChange={setPaidAmount}
+        />
+
         <label>Item Search or SKU
           {isPurchase ? <input name="sku" placeholder="Enter SKU before continuing..." /> : <input name="sku" value={selectedInventory?.sku ?? ''} readOnly />}
         </label>
@@ -420,12 +445,59 @@ function ManualEntryModal({ initialType, currency = 'RWF', mode, onBack, onClose
   )
 }
 
-function formatMoney(value: number, currency = 'RWF') {
-  return new Intl.NumberFormat('en-RW', {
-    style: 'currency',
-    currency,
-    maximumFractionDigits: currency === 'RWF' ? 0 : 2,
-  }).format(value)
+function PaymentFields({
+  payment,
+  paidAmount,
+  total,
+  currency,
+  onPaymentChange,
+  onPaidAmountChange,
+}: {
+  payment: string
+  paidAmount: string
+  total: number
+  currency: string
+  onPaymentChange: (value: string) => void
+  onPaidAmountChange: (value: string) => void
+}) {
+  const outstanding = payment === 'Credit' ? Math.max(0, total - (Number(paidAmount) || 0)) : 0
+
+  return (
+    <div className="field-grid payment-fields">
+      <label>
+        Payment Type
+        <select value={payment} onChange={(event) => onPaymentChange(event.target.value)}>
+          <option value="Cash">Cash</option>
+          <option value="Credit">Credit</option>
+          <option value="Bank transfer">Bank transfer</option>
+        </select>
+      </label>
+      {payment === 'Credit' ? (
+        <>
+          <label>
+            Amount Paid
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              max={total}
+              value={paidAmount}
+              onChange={(event) => onPaidAmountChange(event.target.value)}
+            />
+          </label>
+          <label>
+            Outstanding
+            <input value={formatMoney(outstanding, currency)} readOnly />
+          </label>
+        </>
+      ) : (
+        <label>
+          Amount Paid
+          <input value={formatMoney(total, currency)} readOnly />
+        </label>
+      )}
+    </div>
+  )
 }
 
 function inventoryKey(item: InventoryRow) {

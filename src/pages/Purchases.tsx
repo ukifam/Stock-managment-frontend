@@ -1,15 +1,22 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type React from 'react'
 import { api, type EntryStatus, type PurchaseRow, type PurchaseUpdatePayload } from '../api'
 import { Topbar } from '../components/Topbar'
+import { ImportHelp } from '../components/ImportHelp'
 import { CameraScanner } from '../components/CameraScanner'
-import type { EntryMode, FilterPeriod, ThemePageProps } from '../types'
-import { exportRows, periodLabels } from '../utils/export'
+import type { EntryMode, ThemePageProps } from '../types'
+
+export const page = { id: 'purchases' as const, label: 'Purchases', icon: 'cart' }
+import { exportRows } from '../utils/export'
+import { normalizeCsvRow, parseCsvFile, parseJsonFile } from '../utils/import'
+import { formatMoney } from '../utils/money'
 
 type PurchasesProps = ThemePageProps & {
   startAdding?: boolean
   entryMode?: EntryMode
   onNewEntry?: () => void
   currency?: string
+  onOpenReport?: () => void
 }
 
 type ScannedPurchaseItem = {
@@ -19,28 +26,44 @@ type ScannedPurchaseItem = {
   unitPrice: number
 }
 
-export function Purchases({ theme, toggleTheme, startAdding = false, entryMode = 'scan', onNewEntry, currency = 'RWF' }: PurchasesProps) {
+export function Purchases({ theme, toggleTheme, startAdding = false, entryMode = 'scan', onNewEntry, currency = 'RWF', onOpenReport }: PurchasesProps) {
   const [isAdding, setIsAdding] = useState(startAdding)
-  const [period, setPeriod] = useState<FilterPeriod>('daily')
   const [rows, setRows] = useState<PurchaseRow[]>([])
+  const [filterFrom, setFilterFrom] = useState('')
+  const [filterTo, setFilterTo] = useState('')
+  const [appliedFilterFrom, setAppliedFilterFrom] = useState('')
+  const [appliedFilterTo, setAppliedFilterTo] = useState('')
+  const [manualItem, setManualItem] = useState('')
+  const [manualBrand, setManualBrand] = useState('')
+  const [manualCategory, setManualCategory] = useState('Computing')
+  const [manualSerial, setManualSerial] = useState('')
+  const [manualBarcode, setManualBarcode] = useState('')
+  const [manualQuantity, setManualQuantity] = useState('1')
+  const [manualUnitPrice, setManualUnitPrice] = useState('0')
+  const [manualSaving, setManualSaving] = useState(false)
+  const [manualError, setManualError] = useState('')
   const [selectedId, setSelectedId] = useState('')
   const [scannedItems, setScannedItems] = useState<ScannedPurchaseItem[]>([])
   const [error, setError] = useState('')
   const [supplier, setSupplier] = useState('')
   const [phone, setPhone] = useState('')
+  const [importError, setImportError] = useState('')
+  const [isImporting, setIsImporting] = useState(false)
+  const importInputRef = useRef<HTMLInputElement>(null)
   const isManual = entryMode === 'manual'
 
   useEffect(() => {
-    api.purchases(period).then((response) => {
+    api.purchases(undefined, appliedFilterFrom, appliedFilterTo).then((response) => {
       setRows(response.rows)
       setSelectedId((current) => current || response.rows[0]?.id || '')
     }).catch(() => setRows([]))
-  }, [period])
+  }, [appliedFilterFrom, appliedFilterTo])
 
   const selectedPurchase = rows.find((row) => row.id === selectedId) ?? rows[0]
 
   const handleExport = () => {
-    exportRows(`purchases-${period}.csv`, rows.map((row) => ({
+    const suffix = [appliedFilterFrom, appliedFilterTo].filter(Boolean).join('_to_') || 'all'
+    exportRows(`purchases-${suffix}.csv`, rows.map((row) => ({
       Date: row.date,
       PurchaseId: row.id,
       Item: row.item,
@@ -52,6 +75,50 @@ export function Purchases({ theme, toggleTheme, startAdding = false, entryMode =
     })))
   }
 
+  const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    event.target.value = ''
+    setImportError('')
+    setIsImporting(true)
+
+    try {
+      const rows = file.name.toLowerCase().endsWith('.json')
+        ? await parseJsonFile(file)
+        : await parseCsvFile(file)
+
+      const importedRows = Array.isArray(rows) ? rows : []
+      const payloads = importedRows.map((rawRow) => {
+        const row = normalizeCsvRow(rawRow)
+        return {
+          id: row.purchaseid || row.id || undefined,
+          item: row.item || row.description || row.product || '',
+          supplier: row.supplier || row.vendor || '',
+          phone: row.phone || row.contact || '',
+          sku: row.sku || row.barcode || '',
+          category: row.category || '',
+          quantity: row.quantity || row.qty || row.amount || '1',
+          unitPrice: row.unitprice || row.price || row.value || '0',
+          status: row.status || 'Received',
+        }
+      }).filter((payload) => payload.item)
+
+      if (payloads.length === 0) {
+        setImportError('No valid rows were found in the file.')
+        return
+      }
+
+      const result = await api.bulkImportPurchases(payloads)
+      const skippedNote = result.skipped ? ` (${result.skipped} skipped)` : ''
+      setImportError(`Imported ${result.count} purchases successfully${skippedNote}.`)
+      api.purchases(undefined, appliedFilterFrom, appliedFilterTo).then((response) => setRows(response.rows)).catch(() => undefined)
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : 'Failed to import file.')
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
   const handleStatusChange = async (id: string, status: EntryStatus) => {
     setRows((current) => current.map((row) => row.id === id ? { ...row, status } : row))
 
@@ -59,7 +126,7 @@ export function Purchases({ theme, toggleTheme, startAdding = false, entryMode =
       const updated = await api.updatePurchaseStatus(id, status)
       setRows((current) => current.map((row) => row.id === id ? updated : row))
     } catch {
-      api.purchases(period).then((response) => setRows(response.rows)).catch(() => undefined)
+      api.purchases(undefined, appliedFilterFrom, appliedFilterTo).then((response) => setRows(response.rows)).catch(() => undefined)
       window.alert('Could not update status. Please try again.')
     }
   }
@@ -95,6 +162,74 @@ export function Purchases({ theme, toggleTheme, startAdding = false, entryMode =
   }
 
   const scanTotal = scannedItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)
+  const filteredPurchaseTotal = rows.reduce((sum, row) => sum + Number(row.rawValue ?? row.value ?? 0), 0)
+  const filteredPurchaseQuantity = rows.reduce((sum, row) => sum + Number(row.rawQuantity ?? row.quantity ?? 0), 0)
+
+  const handleCommitPurchase = async () => {
+    if (manualSaving) return
+
+    const hasScannedItems = scannedItems.length > 0
+    if (!hasScannedItems && !manualItem.trim()) {
+      setManualError('Item name is required before saving.')
+      return
+    }
+
+    if (!hasScannedItems && Number(manualQuantity) <= 0) {
+      setManualError('Quantity must be at least 1.')
+      return
+    }
+
+    setManualSaving(true)
+    setManualError('')
+
+    try {
+      const payloads = hasScannedItems
+        ? scannedItems.map((item, index) => ({
+            item: item.item,
+            contactName: supplier || 'Supplier',
+            phone,
+            reference: `PO-${Date.now()}-${index + 1}`,
+            category: 'Uncategorized',
+            quantity: String(item.quantity),
+            unitPrice: String(item.unitPrice),
+            total: String(item.quantity * item.unitPrice),
+            sku: item.sku,
+            payment: 'Cash',
+            paidAmount: String(item.quantity * item.unitPrice),
+          }))
+        : [{
+            item: manualItem.trim(),
+            contactName: supplier || 'Supplier',
+            phone,
+            reference: `PO-${Date.now()}`,
+            category: manualCategory,
+            quantity: manualQuantity,
+            unitPrice: manualUnitPrice,
+            total: String(Number(manualQuantity || 0) * Number(manualUnitPrice || 0)),
+            sku: manualBarcode.trim(),
+            payment: 'Cash',
+            paidAmount: String(Number(manualQuantity || 0) * Number(manualUnitPrice || 0)),
+          }]
+
+      await Promise.all(payloads.map((payload) => api.createPurchase(payload)))
+      const refreshed = await api.purchases(undefined, appliedFilterFrom, appliedFilterTo)
+      setRows(refreshed.rows)
+      setSelectedId(refreshed.rows[0]?.id || '')
+      setIsAdding(false)
+      setManualItem('')
+      setManualBrand('')
+      setManualCategory('Computing')
+      setManualSerial('')
+      setManualBarcode('')
+      setManualQuantity('1')
+      setManualUnitPrice('0')
+      setScannedItems([])
+    } catch (error) {
+      setManualError(error instanceof Error ? error.message : 'Could not save purchase.')
+    } finally {
+      setManualSaving(false)
+    }
+  }
 
   if (isAdding) {
     return (
@@ -102,7 +237,7 @@ export function Purchases({ theme, toggleTheme, startAdding = false, entryMode =
         <Topbar placeholder="Global identification..." theme={theme} toggleTheme={toggleTheme} />
         <div className="purchase-page page-pad">
           <div className="crumbs">Logistics / Purchases / <b>{isManual ? 'Manual Entry' : 'Smart Entry'}</b></div>
-          <div className="form-head"><h1>{isManual ? 'Manual Add Purchase' : 'Smart Add Purchase'}</h1><div className="toolbar"><button type="button" onClick={() => setIsAdding(false)}>Back to Table</button><button type="button">Discard</button><button className="primary-action" type="button">Commit Transaction</button></div></div>
+          <div className="form-head"><h1>{isManual ? 'Manual Add Purchase' : 'Smart Add Purchase'}</h1><div className="toolbar"><button type="button" onClick={() => setIsAdding(false)}>Back to Table</button><button type="button">Discard</button><button className="primary-action" type="button" onClick={handleCommitPurchase} disabled={manualSaving}>{manualSaving ? 'Saving…' : 'Commit Transaction'}</button></div></div>
           <section className={isManual ? 'purchase-grid manual-entry-grid' : 'purchase-grid'}>
             {!isManual && (
               <div className="scan-column">
@@ -210,7 +345,13 @@ export function Purchases({ theme, toggleTheme, startAdding = false, entryMode =
               {isManual && (
                 <article className="panel compact-panel">
                   <h2>Item Details</h2>
-                  <div className="field-grid"><label>Item Name<input placeholder="Enter item name..." /></label><label>Brand<input placeholder="Enter brand..." /></label><label>Category<select><option>Computing</option><option>Visual Displays</option><option>Peripherals</option></select></label><label>Serial Number<input placeholder="Enter serial number..." /></label><label>Barcode<input placeholder="Enter barcode..." /></label></div>
+                  <div className="field-grid">
+                    <label>Item Name<input value={manualItem} onChange={(event) => setManualItem(event.target.value)} placeholder="Enter item name..." /></label>
+                    <label>Brand<input value={manualBrand} onChange={(event) => setManualBrand(event.target.value)} placeholder="Enter brand..." /></label>
+                    <label>Category<select value={manualCategory} onChange={(event) => setManualCategory(event.target.value)}><option>Computing</option><option>Visual Displays</option><option>Peripherals</option><option>Imaging Gear</option><option>Drones</option><option>Uncategorized</option></select></label>
+                    <label>Serial Number<input value={manualSerial} onChange={(event) => setManualSerial(event.target.value)} placeholder="Enter serial number..." /></label>
+                    <label>Barcode<input value={manualBarcode} onChange={(event) => setManualBarcode(event.target.value)} placeholder="Enter barcode..." /></label>
+                  </div>
                 </article>
               )}
               <article className="panel compact-panel">
@@ -234,8 +375,9 @@ export function Purchases({ theme, toggleTheme, startAdding = false, entryMode =
                   </label>
                 </div>
                 {isManual && (
-                  <div className="field-grid money-grid"><label>Quantity<input placeholder="1" /></label><label>Unit Price<input placeholder="$ 0.00" /></label><label>Total<input placeholder="$ 0.00" readOnly /></label></div>
+                  <div className="field-grid money-grid"><label>Quantity<input type="number" min="1" value={manualQuantity} onChange={(event) => setManualQuantity(event.target.value)} /></label><label>Unit Price<input type="number" min="0" step="0.01" value={manualUnitPrice} onChange={(event) => setManualUnitPrice(event.target.value)} /></label><label>Total<input value={formatMoney(Number(manualQuantity || 0) * Number(manualUnitPrice || 0), currency)} readOnly /></label></div>
                 )}
+                {manualError && <div style={{ color: '#d32f2f', padding: '8px', marginTop: '12px', backgroundColor: '#ffebee', borderRadius: '4px', fontSize: '14px' }}>{manualError}</div>}
               </article>
             </div>
           </section>
@@ -251,8 +393,23 @@ export function Purchases({ theme, toggleTheme, startAdding = false, entryMode =
         <section className="purchase-page page-pad list-page">
           <div className="inventory-title">
             <div><h1>Purchase Orders</h1><p>Receive supplier shipments and convert scanned products into stock.</p></div>
-            <div className="toolbar"><PeriodSelect period={period} setPeriod={setPeriod} /><button type="button" onClick={handleExport}>Export</button><button className="primary-action" type="button" onClick={onNewEntry ?? (() => setIsAdding(true))}>New Purchase</button></div>
+            <div className="toolbar">
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>From<input type="date" value={filterFrom} onChange={(event) => setFilterFrom(event.target.value)} /></label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>To<input type="date" value={filterTo} onChange={(event) => setFilterTo(event.target.value)} /></label>
+              <button type="button" onClick={() => { setAppliedFilterFrom(filterFrom); setAppliedFilterTo(filterTo) }}>Apply</button>
+              <button type="button" onClick={() => { setFilterFrom(''); setFilterTo(''); setAppliedFilterFrom(''); setAppliedFilterTo('') }}>Clear</button>
+              <button type="button" onClick={handleExport}>Export CSV</button>
+              {onOpenReport && (
+                <button type="button" onClick={onOpenReport}>Purchase Report</button>
+              )}
+              <button type="button" onClick={() => importInputRef.current?.click()} disabled={isImporting}>
+                {isImporting ? 'Importing…' : 'Import'}
+              </button>
+              <button className="primary-action" type="button" onClick={onNewEntry ?? (() => setIsAdding(true))}>New Purchase</button>
+              <input ref={importInputRef} type="file" accept=".csv,.json" hidden onChange={handleImportFile} />
+            </div>
           </div>
+          <ImportHelp kind="purchases" />
           <div className="table-frame">
             <table>
               <thead><tr><th>Date</th><th>Purchase ID</th><th>Item Name</th><th>Supplier Name</th><th>Phone Number</th><th>Quantity</th><th>Total Value</th><th>Status</th></tr></thead>
@@ -268,7 +425,18 @@ export function Purchases({ theme, toggleTheme, startAdding = false, entryMode =
               </tbody>
             </table>
           </div>
-          <div className="inventory-stats"><div><span>Orders</span><strong>{rows.length}</strong></div><div><span>Received</span><strong>{rows.filter((row) => row.status === 'Received').length}</strong></div><div><span>Returned</span><strong>{rows.filter((row) => row.status === 'Returned').length}</strong></div></div>
+            {importError && (
+              <div style={{ marginTop: '12px', color: importError.startsWith('Imported') ? '#1b5e20' : '#d32f2f' }}>
+                {importError}
+              </div>
+            )}
+          <div className="inventory-stats">
+            <div><span>Orders</span><strong>{rows.length}</strong></div>
+            <div><span>Filtered Total</span><strong>{formatMoney(filteredPurchaseTotal, currency)}</strong></div>
+            <div><span>Filtered Qty</span><strong>{filteredPurchaseQuantity}</strong></div>
+            <div><span>Received</span><strong>{rows.filter((row) => row.status === 'Received').length}</strong></div>
+            <div><span>Returned</span><strong>{rows.filter((row) => row.status === 'Returned').length}</strong></div>
+          </div>
         </section>
         <PurchaseDetailPanel row={selectedPurchase} onUpdate={handlePurchaseUpdate} />
       </div>
@@ -287,6 +455,7 @@ type PurchaseEditForm = {
   quantity: string
   unitPrice: string
   status: string
+  paidAmount?: string
 }
 
 function PurchaseDetailPanel({ row, onUpdate }: { row?: PurchaseRow; onUpdate: (id: string, payload: PurchaseUpdatePayload) => Promise<void> }) {
@@ -333,6 +502,7 @@ function PurchaseDetailPanel({ row, onUpdate }: { row?: PurchaseRow; onUpdate: (
         category: form.category,
         quantity: form.quantity,
         unitPrice: form.unitPrice,
+        paidAmount: form.paidAmount,
         status: form.status,
         extractedText: row.extractedText,
       })
@@ -393,6 +563,9 @@ function PurchaseDetailPanel({ row, onUpdate }: { row?: PurchaseRow; onUpdate: (
             <label>Unit Price
               <input type="number" min="0" step="0.01" value={form.unitPrice} onChange={(event) => updateForm('unitPrice', event.target.value)} />
             </label>
+            <label>Paid Amount
+              <input type="text" value={form.paidAmount ?? ''} onChange={(event) => updateForm('paidAmount', event.target.value)} />
+            </label>
           </div>
           {error && <div style={{ color: '#d32f2f', padding: '8px', marginTop: '12px', backgroundColor: '#ffebee', borderRadius: '4px', fontSize: '14px' }}>{error}</div>}
           <div className="modal-actions" style={{ position: 'static', margin: '18px 0 0', padding: 0, background: 'transparent' }}>
@@ -411,6 +584,7 @@ function PurchaseDetailPanel({ row, onUpdate }: { row?: PurchaseRow; onUpdate: (
           <div><dt>Category</dt><dd>{row?.category || '-'}</dd></div>
           <div><dt>Quantity</dt><dd>{row?.quantity ?? '-'}</dd></div>
           <div><dt>Unit Price</dt><dd>{row?.unitPrice ?? '-'}</dd></div>
+          <div><dt>Paid Amount</dt><dd>{row?.paidAmount ?? '-'}</dd></div>
           <div><dt>Total Value</dt><dd>{row?.value ?? '-'}</dd></div>
           <div><dt>Date</dt><dd>{row?.date ?? '-'}</dd></div>
           <div><dt>Status</dt><dd>{row?.status ?? '-'}</dd></div>
@@ -434,6 +608,7 @@ function purchaseFormFromRow(row?: PurchaseRow): PurchaseEditForm {
     quantity: String(row?.rawQuantity ?? 1),
     unitPrice: String(row?.rawUnitPrice ?? 0),
     status: row?.status ?? 'Received',
+    paidAmount: row?.paidAmount ?? '',
   }
 }
 
@@ -448,18 +623,3 @@ function StatusSelect({ value, onChange }: { value: string; onChange: (status: E
   )
 }
 
-function PeriodSelect({ period, setPeriod }: { period: FilterPeriod; setPeriod: (period: FilterPeriod) => void }) {
-  return (
-    <select className="period-select" value={period} onChange={(event) => setPeriod(event.target.value as FilterPeriod)} aria-label="Filter purchase period">
-      {Object.entries(periodLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-    </select>
-  )
-}
-
-function formatMoney(value: number, currency = 'RWF') {
-  return new Intl.NumberFormat('en-RW', {
-    style: 'currency',
-    currency,
-    maximumFractionDigits: currency === 'RWF' ? 0 : 2,
-  }).format(value)
-}
