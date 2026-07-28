@@ -2,7 +2,14 @@ import type { FilterPeriod } from './types'
 
 export type CreditFilter = 'all' | 'salesCredit' | 'purchasesCredit'
 
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:5000/api'
+const DEFAULT_API_URL = 'http://localhost:5000/api'
+const API_URL = (() => {
+  const configured = (import.meta.env.VITE_API_URL ?? DEFAULT_API_URL).trim()
+  if (!configured) return DEFAULT_API_URL
+
+  const normalized = configured.replace(/\/+$/, '')
+  return normalized.endsWith('/api') ? normalized : `${normalized}/api`
+})()
 
 export type Metric = {
   label: string
