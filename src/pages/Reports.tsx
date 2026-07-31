@@ -63,6 +63,33 @@ function formatNumberNoCurrency(val: string | number | undefined, currency = 'RW
   }).format(numberValue)
 }
 
+function getProfitStatus(netProfit: string | number | undefined) {
+  const amount = parseNumber(netProfit)
+  if (amount > 0) {
+    return {
+      label: 'Profit',
+      tone: 'profit',
+      note: 'The business made money in this period.',
+    }
+  }
+  if (amount < 0) {
+    return {
+      label: 'Loss',
+      tone: 'loss',
+      note: 'The business spent more than it earned in this period.',
+    }
+  }
+  return {
+    label: 'Break even',
+    tone: 'even',
+    note: 'Income and costs are equal in this period.',
+  }
+}
+
+function formatSignedAmount(amount: number, currency = 'RWF') {
+  return `${currency} ${formatNumberNoCurrency(amount, currency)}`
+}
+
 function toLedgerRow(row: ReportTransaction, currency: string): LedgerRow {
   const rawAmount = row.rawValue ?? parseNumber(row.value)
   const rawPaid = row.rawPaidAmount ?? parseNumber(row.paidAmount ?? row.value)
@@ -226,6 +253,11 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
     onReportScopeChange?.(scope)
   }
 
+  const soldGoodsStatus = getProfitStatus(reports.summary?.netProfit)
+  const generalResult = parseNumber(reports.summary?.totalSales) - parseNumber(reports.summary?.totalPurchases)
+  const generalStatus = getProfitStatus(generalResult)
+  const generalResultText = formatSignedAmount(generalResult, currency)
+
   const transactionSummaryRows = [
     {
       category: 'Purchases',
@@ -241,6 +273,7 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
       credit: reports.summary?.salesOnCredit ?? '-',
       outstanding: reports.summary?.salesOnCredit ?? '-',
     },
+    { category: 'Monthly Profit', total: generalResultText, cash: generalStatus.label, credit: '-', outstanding: '-' },
     { category: cogsLabel, total: reports.summary?.costOfGoodsSold ?? '-', cash: '-', credit: '-', outstanding: '-' },
     { category: 'Gross Profit', total: reports.summary?.grossProfit ?? '-', cash: '-', credit: '-', outstanding: '-' },
     {
@@ -250,7 +283,7 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
       credit: '-',
       outstanding: '-',
     },
-    { category: 'Net Profit', total: reports.summary?.netProfit ?? '-', cash: '-', credit: '-', outstanding: '-' },
+    { category: 'Net Profit', total: reports.summary?.netProfit ?? '-', cash: soldGoodsStatus.label, credit: '-', outstanding: '-' },
     {
       category: 'Payments (Made)',
       total: reports.summary?.totalPayments ?? '-',
@@ -266,8 +299,8 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
       : viewScope === 'purchases'
       ? [transactionSummaryRows[0]]
       : viewScope === 'sales'
-      ? [transactionSummaryRows[1], transactionSummaryRows[2], transactionSummaryRows[3]]
-      : [transactionSummaryRows[3]]
+      ? [transactionSummaryRows[1], transactionSummaryRows[2], transactionSummaryRows[3], transactionSummaryRows[4], transactionSummaryRows[6]]
+      : [transactionSummaryRows[5], transactionSummaryRows[6]]
   const grossMargin =
     reports.summary?.grossProfit && reports.summary?.totalSales
       ? (
@@ -276,17 +309,10 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
         ).toFixed(1)
       : null
 
-  const netMargin =
-    reports.summary?.netProfit && reports.summary?.totalSales
-      ? (
-          (parseNumber(reports.summary.netProfit) / Math.max(parseNumber(reports.summary.totalSales), 1)) *
-          100
-        ).toFixed(1)
-      : null
-
   const reportHighlights = [
     { label: 'Period', value: `${fromDate} → ${toDate}` },
     { label: 'Filter', value: creditFilterLabel },
+    { label: 'Monthly Profit', value: generalStatus.label },
     { label: 'Transactions', value: String(reports.summary?.totalTransactions ?? ledgerRows.length) },
     { label: 'Currency', value: currency },
   ]
@@ -333,9 +359,12 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
         { Section: 'Summary', Field: 'Total Sales', Value: reports.summary.totalSales ?? '' },
         { Section: 'Summary', Field: 'Total Purchases', Value: reports.summary.totalPurchases ?? '' },
         { Section: 'Summary', Field: cogsLabel, Value: reports.summary.costOfGoodsSold ?? '' },
+        { Section: 'Summary', Field: 'Monthly Profit', Value: generalResultText },
+        { Section: 'Summary', Field: 'General Status', Value: generalStatus.label },
         { Section: 'Summary', Field: 'Gross Profit', Value: reports.summary.grossProfit ?? '' },
         { Section: 'Summary', Field: 'Total Expenses', Value: reports.summary.totalExpenses ?? reports.summary.taxes ?? '' },
         { Section: 'Summary', Field: 'Net Profit', Value: reports.summary.netProfit ?? '' },
+        { Section: 'Summary', Field: 'Net Profit Status', Value: soldGoodsStatus.label },
       )
     }
 
@@ -369,6 +398,8 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
     doc.text(scopeLabels[viewScope], margin, 28)
     doc.setFontSize(10)
     doc.setFont('helvetica', 'normal')
+    doc.text(`Monthly profit: ${generalStatus.label} (${generalResultText})`, margin, 62)
+    doc.text(`Gross and net profit use sold items only`, margin, 76)
     doc.text(`TRI LTD • ${fromDate} to ${toDate} • ${creditFilterLabel}`, margin, 48)
     doc.setTextColor(17, 24, 39)
     y = 112
@@ -430,34 +461,58 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
 
     y += cardHeight + 12
 
-    // Bottom profit cards
+    // Bottom result cards
     const profitCardHeight = 110
-    const leftProfitX = margin
-    const rightProfitX = margin + halfWidth + headerGap
+    const resultGap = 10
+    const resultWidth = (tableWidth - resultGap * 2) / 3
+    const generalX = margin
+    const grossX = margin + resultWidth + resultGap
+    const netX = margin + (resultWidth + resultGap) * 2
 
-    // Gross profit (left)
+    if (generalStatus.tone === 'loss') {
+      doc.setFillColor(255, 241, 242)
+    } else if (generalStatus.tone === 'even') {
+      doc.setFillColor(248, 250, 252)
+    } else {
+      doc.setFillColor(240, 255, 245)
+    }
+    doc.roundedRect(generalX, y, resultWidth, profitCardHeight, 10, 10, 'F')
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(10)
+    doc.text(`GENERAL - ${generalStatus.label.toUpperCase()}`, generalX + 12, y + 22)
+    doc.setFontSize(15)
+    doc.text(generalResultText, generalX + 12, y + 54)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(9)
+    doc.text('Sales minus all purchases', generalX + 12, y + 78)
+
     doc.setFillColor(255, 250, 230)
-    doc.roundedRect(leftProfitX, y, halfWidth, profitCardHeight, 10, 10, 'F')
+    doc.roundedRect(grossX, y, resultWidth, profitCardHeight, 10, 10, 'F')
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(10)
-    doc.text('GROSS PROFIT', leftProfitX + 18, y + 22)
-    doc.setFontSize(20)
-    doc.text(`${currency} ${formatNumberNoCurrency(reports.summary?.grossProfit ?? '-')}`, leftProfitX + 18, y + 56)
+    doc.text('GROSS PROFIT', grossX + 12, y + 22)
+    doc.setFontSize(15)
+    doc.text(`${currency} ${formatNumberNoCurrency(reports.summary?.grossProfit ?? '-')}`, grossX + 12, y + 54)
     doc.setFont('helvetica', 'normal')
-    doc.setFontSize(10)
-    doc.text(grossMargin ? `${grossMargin}% gross margin` : `Sales minus ${cogsLabel.toLowerCase()}`, leftProfitX + 18, y + 80)
+    doc.setFontSize(9)
+    doc.text(grossMargin ? `${grossMargin}% gross margin` : `Sales minus sold cost`, grossX + 12, y + 78)
 
-    // Net profit (right)
-    doc.setFillColor(240, 255, 245)
-    doc.roundedRect(rightProfitX, y, halfWidth, profitCardHeight, 10, 10, 'F')
+    if (soldGoodsStatus.tone === 'loss') {
+      doc.setFillColor(255, 241, 242)
+    } else if (soldGoodsStatus.tone === 'even') {
+      doc.setFillColor(248, 250, 252)
+    } else {
+      doc.setFillColor(240, 255, 245)
+    }
+    doc.roundedRect(netX, y, resultWidth, profitCardHeight, 10, 10, 'F')
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(10)
-    doc.text('NET PROFIT', rightProfitX + 18, y + 22)
-    doc.setFontSize(20)
-    doc.text(`${currency} ${formatNumberNoCurrency(reports.summary?.netProfit ?? '-')}`, rightProfitX + 18, y + 56)
+    doc.text(`NET PROFIT - ${soldGoodsStatus.label.toUpperCase()}`, netX + 12, y + 22)
+    doc.setFontSize(15)
+    doc.text(`${currency} ${formatNumberNoCurrency(reports.summary?.netProfit ?? '-')}`, netX + 12, y + 54)
     doc.setFont('helvetica', 'normal')
-    doc.setFontSize(10)
-    doc.text(netMargin ? `${netMargin}% net margin` : 'Gross profit minus expenses', rightProfitX + 18, y + 80)
+    doc.setFontSize(9)
+    doc.text('Gross profit minus expenses', netX + 12, y + 78)
 
     y += profitCardHeight + 16
     const columnWidths = [44, 78, 112, 48, 42, 41, 41, 41]
@@ -844,6 +899,11 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
                 </div>
               </div>
               <div className="report-profit-summary">
+                <article className={`summary-card result ${generalStatus.tone}`}>
+                  <span className="result-label">Monthly Profit</span>
+                  <strong>{generalResultText}</strong>
+                  <small>{generalStatus.label}: sales minus all purchases.</small>
+                </article>
                 <article className="summary-card gross">
                   <span className="card-icon">
                     <MetricIcon kind="gross" />
@@ -852,13 +912,13 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
                   <strong>{reports.summary.grossProfit ?? '-'}</strong>
                   <small>{grossMargin ? `${grossMargin}% gross margin` : `Sales minus ${cogsLabel.toLowerCase()}`}</small>
                 </article>
-                <article className="summary-card net">
+                <article className={`summary-card net ${soldGoodsStatus.tone}`}>
                   <span className="card-icon">
                     <MetricIcon kind="net" />
                   </span>
                   <h3>Net Profit</h3>
                   <strong>{reports.summary.netProfit ?? '-'}</strong>
-                  <small>{netMargin ? `${netMargin}% net margin` : 'Gross profit minus expenses'}</small>
+                  <small>Gross profit minus expenses.</small>
                 </article>
               </div>
             </section>
@@ -916,3 +976,7 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
     </>
   )
 }
+
+
+
+

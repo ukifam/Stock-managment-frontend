@@ -2984,6 +2984,40 @@ select {
 .summary-card.sales-credit .card-icon { color: #2563eb; }
 .summary-card.expenses .card-icon { color: #e11d48; }
 
+.report-profit-summary {
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+}
+
+.summary-card.result {
+  padding-left: 18px;
+}
+
+.summary-card.result.profit {
+  background: linear-gradient(180deg, #ecfdf5, #f6fef9);
+  border-color: rgba(5, 150, 105, 0.18);
+}
+
+.summary-card.result.loss {
+  background: linear-gradient(180deg, #fff1f2, #fff7f8);
+  border-color: rgba(225, 29, 72, 0.18);
+}
+
+.summary-card.result.even {
+  background: linear-gradient(180deg, #f8fafc, #ffffff);
+  border-color: rgba(100, 116, 139, 0.18);
+}
+
+.summary-card.result .result-label {
+  color: #475569;
+  font: 600 11px var(--display);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.summary-card.result.profit strong { color: #047857; }
+.summary-card.result.loss strong { color: #be123c; }
+.summary-card.result.even strong { color: #475569; }
+
 .transaction-summary {
   margin-bottom: 28px;
 }
@@ -3418,6 +3452,7 @@ select {
   }
 
   .profit-kpi-row,
+  .report-profit-summary,
   .summary-cards,
   .summary-cards.secondary-kpis {
     grid-template-columns: 1fr;

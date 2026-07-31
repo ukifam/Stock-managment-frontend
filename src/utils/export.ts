@@ -71,5 +71,12 @@ function daysBetween(left: Date, right: Date) {
 }
 
 function csvCell(value = '') {
-  return `"${value.replaceAll('"', '""')}"`
+  const escaped = value.replaceAll('"', '""')
+
+  // Force Excel to keep slash-separated values as text instead of converting them to dates.
+  if (/^\d+\/\d+$/.test(value)) {
+    return `="${escaped}"`
+  }
+
+  return `"${escaped}"`
 }
