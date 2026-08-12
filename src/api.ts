@@ -128,6 +128,10 @@ export type ReportTransaction = {
   outstanding?: string
   rawPaidAmount?: number
   rawOutstanding?: number
+  purchasePrice?: string
+  rawPurchasePrice?: number
+  unitPrice?: string
+  rawUnitPrice?: number
 }
 
 export type ReportsResponse = {

@@ -18,6 +18,10 @@ type LedgerRow = {
   type: string
   id: string
   description: string
+  purchasePrice: string
+  unitPrice: string
+  quantity: string
+  profit: string
   party: string
   payment: string
   amount: string
@@ -26,6 +30,9 @@ type LedgerRow = {
   rawAmount: number
   rawPaid: number
   rawOutstanding: number
+  rawPurchasePrice: number
+  rawUnitPrice: number
+  rawProfit: number
 }
 
 const scopeLabels: Record<ReportScope, string> = {
@@ -63,6 +70,43 @@ function formatNumberNoCurrency(val: string | number | undefined, currency = 'RW
   }).format(numberValue)
 }
 
+function slugifyDisplay(value: string | undefined) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 24) || 'item'
+}
+
+function formatDisplayId(id: string | undefined, type: string, item?: string, date?: string) {
+  if (!id) return '-'
+  const raw = String(id)
+
+  // If already human readable (contains colon time), show as-is
+  if (/^[A-Z]{2}-[a-z0-9-]+-\d{4}-\d{2}-\d{2}-\d{2}:\d{2}$/i.test(raw)) return raw
+
+  // Try to extract a timestamp from the id (legacy Date.now() style)
+  const tsMatch = raw.match(/(\d{10,13})/)
+  const timestamp = tsMatch ? Number(tsMatch[1]) : NaN
+  const dateObj = Number.isFinite(timestamp) ? new Date(timestamp) : date ? new Date(`${date}T12:00:00`) : undefined
+
+  const prefix = (raw.startsWith('PO-') || raw.startsWith('po-')) ? 'PO' : (raw.startsWith('SO-') || raw.startsWith('so-')) ? 'SO' : type && /purchase/i.test(type) ? 'PO' : 'SO'
+  const slug = slugifyDisplay(item)
+
+  if (dateObj && !Number.isNaN(dateObj.getTime())) {
+    const y = dateObj.getFullYear()
+    const m = String(dateObj.getMonth() + 1).padStart(2, '0')
+    const d = String(dateObj.getDate()).padStart(2, '0')
+    const hh = String(dateObj.getHours()).padStart(2, '0')
+    const mm = String(dateObj.getMinutes()).padStart(2, '0')
+    return `${prefix}-${slug}-${y}-${m}-${d}-${hh}:${mm}`
+  }
+
+  // fallback: return original id
+  return raw
+}
+
 function getProfitStatus(netProfit: string | number | undefined) {
   const amount = parseNumber(netProfit)
   if (amount > 0) {
@@ -95,11 +139,20 @@ function toLedgerRow(row: ReportTransaction, currency: string): LedgerRow {
   const rawPaid = row.rawPaidAmount ?? parseNumber(row.paidAmount ?? row.value)
   const rawOutstanding = row.rawOutstanding ?? parseNumber(row.outstanding)
 
+  const rawPurchasePrice = row.rawPurchasePrice ?? parseNumber(row.purchasePrice)
+  const rawUnitPrice = row.rawUnitPrice ?? parseNumber(row.unitPrice)
+  const rawQty = Number(parseNumber(row.quantity)) || 0
+  const rawProfit = rawAmount - (rawPurchasePrice || 0)
+
   return {
     date: row.date ?? '-',
     type: row.type,
     id: row.id ?? '-',
     description: row.item ?? row.description ?? '-',
+    purchasePrice: row.purchasePrice ?? formatNumberNoCurrency(rawPurchasePrice, currency),
+    unitPrice: row.unitPrice ?? formatNumberNoCurrency(rawUnitPrice, currency),
+    quantity: `${rawQty} Units`,
+    profit: formatNumberNoCurrency(rawProfit, currency),
     party: row.supplier ?? row.customer ?? '-',
     payment: row.payment ?? row.status ?? '-',
     // on-page display: no currency symbol, only formatted numbers
@@ -109,6 +162,9 @@ function toLedgerRow(row: ReportTransaction, currency: string): LedgerRow {
     rawAmount,
     rawPaid,
     rawOutstanding,
+    rawPurchasePrice,
+    rawUnitPrice,
+    rawProfit,
   }
 }
 
@@ -133,8 +189,10 @@ function sumLedger(rows: LedgerRow[]) {
       amount: totals.amount + row.rawAmount,
       paid: totals.paid + row.rawPaid,
       outstanding: totals.outstanding + row.rawOutstanding,
+      profit: (totals.profit || 0) + (row.rawProfit || 0),
+      purchase: totals.purchase + row.rawPurchasePrice,
     }),
-    { amount: 0, paid: 0, outstanding: 0 },
+    { amount: 0, paid: 0, outstanding: 0, profit: 0, purchase: 0 },
   )
 }
 
@@ -368,30 +426,44 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
       )
     }
 
-    const ledgerExportRows = ledgerRows.map((row) => ({
-      Section: 'Ledger',
-      Date: row.date,
-      Type: row.type,
-      ID: row.id,
-      Description: row.description,
-      Party: row.party,
-      Payment: row.payment,
-      Amount: row.amount,
-      Paid: row.paid,
-      Outstanding: row.outstanding,
-    }))
+    const ledgerExportRows = ledgerRows.map((row) => {
+      const baseRow = {
+        Section: 'Ledger',
+        Date: row.date,
+        Type: row.type,
+        ID: formatDisplayId(row.id, row.type, row.description, row.date),
+        Description: row.description,
+        'Unit Price': row.unitPrice,
+        Quantity: row.quantity,
+        Party: row.party,
+        Payment: row.payment,
+        Amount: row.amount,
+        Paid: row.paid,
+        Outstanding: row.outstanding,
+      }
+
+      if (viewScope === 'purchases') {
+        return baseRow
+      }
+
+      return {
+        ...baseRow,
+        Purchase: row.purchasePrice,
+        Profit: row.profit,
+      }
+    })
 
     exportRows(`TRI-LTD-${viewScope}-Report-${fromDate}-to-${toDate}.csv`, [...metaRows, ...ledgerExportRows] as Record<string, string>[])
   }
 
   const exportReportPdf = () => {
     const title = `TRI_LTD_${viewScope}_Report_${fromDate}_to_${toDate}`
-    const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' })
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' })
     const margin = 40
     let y = 50
 
     doc.setFillColor(37, 99, 235)
-    doc.rect(0, 0, 595, 86, 'F')
+    doc.rect(0, 0, doc.internal.pageSize.getWidth(), 86, 'F')
     doc.setTextColor(255, 255, 255)
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(18)
@@ -515,60 +587,122 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
     doc.text('Gross profit minus expenses', netX + 12, y + 78)
 
     y += profitCardHeight + 16
-    const columnWidths = [44, 78, 112, 48, 42, 41, 41, 41]
-    const columnPositions = columnWidths.reduce<number[]>((acc, _, index) => {
-      if (index === 0) return [0]
-      return [...acc, acc[index - 1] + columnWidths[index - 1] + 6]
-    }, [])
+    const getPdfColumnsForGroup = (groupKey: string) => {
+      if (groupKey === 'sales') {
+        return [
+          { key: 'id', label: 'Ref', flex: 0.14, right: false },
+          { key: 'description', label: 'Description', flex: 0.24, right: false },
+          { key: 'purchasePrice', label: 'Purchase', flex: 0.10, right: true },
+          { key: 'unitPrice', label: 'Unit', flex: 0.10, right: true },
+          { key: 'quantity', label: 'Qty', flex: 0.06, right: false },
+          { key: 'party', label: 'Party', flex: 0.14, right: false },
+          { key: 'payment', label: 'Payment', flex: 0.08, right: false },
+          { key: 'amount', label: 'Amount', flex: 0.08, right: true },
+          { key: 'profit', label: 'Profit', flex: 0.08, right: true },
+          { key: 'paid', label: 'Paid', flex: 0.05, right: true },
+          { key: 'outstanding', label: 'Due', flex: 0.07, right: true },
+        ]
+      }
+
+      if (groupKey === 'purchases') {
+        return [
+          { key: 'id', label: 'Ref', flex: 0.16, right: false },
+          { key: 'description', label: 'Description', flex: 0.28, right: false },
+          { key: 'unitPrice', label: 'Unit', flex: 0.12, right: true },
+          { key: 'quantity', label: 'Qty', flex: 0.06, right: false },
+          { key: 'party', label: 'Party', flex: 0.15, right: false },
+          { key: 'payment', label: 'Payment', flex: 0.08, right: false },
+          { key: 'amount', label: 'Amount', flex: 0.10, right: true },
+          { key: 'paid', label: 'Paid', flex: 0.06, right: true },
+          { key: 'outstanding', label: 'Due', flex: 0.09, right: true },
+        ]
+      }
+
+      return [
+        { key: 'id', label: 'Ref', flex: 0.18, right: false },
+        { key: 'description', label: 'Description', flex: 0.36, right: false },
+        { key: 'party', label: 'Party', flex: 0.18, right: false },
+        { key: 'payment', label: 'Payment', flex: 0.12, right: false },
+        { key: 'amount', label: 'Amount', flex: 0.08, right: true },
+        { key: 'paid', label: 'Paid', flex: 0.06, right: true },
+        { key: 'outstanding', label: 'Due', flex: 0.08, right: true },
+      ]
+    }
+
+    const calculateColumnWidths = (columns: { flex: number }[], totalWidth: number) => {
+      const spacing = 6 * Math.max(0, columns.length - 1)
+      const available = totalWidth - spacing
+      const minWidth = 40
+      const totalFlex = columns.reduce((sum, column) => sum + column.flex, 0) || columns.length
+      const widths = columns.map((column) => Math.max(minWidth, Math.round((column.flex / totalFlex) * available)))
+      let used = widths.reduce((sum, width) => sum + width, 0)
+
+      if (used > available) {
+        const shrinkable = widths.map((width, index) => ({ width, index })).filter((item) => item.width > minWidth)
+        while (used > available && shrinkable.length) {
+          shrinkable.sort((a, b) => b.width - a.width)
+          const item = shrinkable[0]
+          const reduction = Math.min(item.width - minWidth, used - available)
+          widths[item.index] -= reduction
+          used -= reduction
+          item.width -= reduction
+          if (item.width <= minWidth) shrinkable.shift()
+        }
+      } else if (used < available) {
+        let extra = available - used
+        const flexibleIndices = columns.map((_, index) => index)
+        let i = 0
+        while (extra > 0 && flexibleIndices.length) {
+          widths[flexibleIndices[i % flexibleIndices.length]] += 1
+          extra -= 1
+          i += 1
+        }
+      }
+
+      return widths
+    }
+
     const maxY = pageHeight - margin
 
-    const renderTableHeader = (x: number, y: number) => {
-      const headers = [
-        'Date',
-        'Ref',
-        'Description',
-        'Party',
-        'Payment',
-        'Amount',
-        'Paid',
-        'Due',
-      ]
+    const renderTableHeader = (x: number, y: number, columns: { key: string; label: string; flex: number; right: boolean }[], positions: number[], widths: number[]) => {
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(10)
       doc.setTextColor(255, 255, 255)
       doc.setFillColor(17, 24, 39)
       doc.rect(x - 2, y - 10, tableWidth + 4, 18, 'F')
-      headers.forEach((header, index) => {
-        const isMoneyColumn = index >= 5
-        doc.text(header, x + columnPositions[index] + (isMoneyColumn ? columnWidths[index] : 0), y, {
-          align: isMoneyColumn ? 'right' : 'left',
+      columns.forEach((column, index) => {
+        doc.text(column.label, x + positions[index] + (column.right ? widths[index] : 0), y, {
+          align: column.right ? 'right' : 'left',
         })
       })
       doc.setTextColor(17, 24, 39)
       return y + rowSpacing + 6
     }
 
-    const measureRowHeight = (row: LedgerRow) => {
-      const values = [row.date, row.id, row.description, row.party, row.payment, row.amount, row.paid, row.outstanding]
+    const getRowValue = (row: LedgerRow, key: string) => {
+      if (key === 'id') return formatDisplayId(row.id, row.type, row.description, row.date)
+      return String((row as any)[key] ?? '-')
+    }
+
+    const measureRowHeight = (row: LedgerRow, widths: number[], columns: { key: string; label: string; flex: number; right: boolean }[]) => {
       return Math.max(
-        ...values.map((value, index) => {
-          const lines = doc.splitTextToSize(String(value ?? '-'), columnWidths[index])
+        ...columns.map((column, index) => {
+          const lines = doc.splitTextToSize(getRowValue(row, column.key), widths[index])
           return lines.length * rowSpacing
         }),
       )
     }
 
-    const renderTableRow = (row: LedgerRow, x: number, y: number) => {
+    const renderTableRow = (row: LedgerRow, x: number, y: number, widths: number[], positions: number[], columns: { key: string; label: string; flex: number; right: boolean }[]) => {
       doc.setFont('helvetica', 'normal')
       doc.setFontSize(9)
-      const values = [row.date, row.id, row.description, row.party, row.payment, row.amount, row.paid, row.outstanding]
       let rowHeight = 0
 
-      values.forEach((value, index) => {
-        const lines = doc.splitTextToSize(String(value ?? '-'), columnWidths[index])
-        const isMoneyColumn = index >= 5
-        doc.text(lines, x + columnPositions[index] + (isMoneyColumn ? columnWidths[index] : 0), y, {
-          align: isMoneyColumn ? 'right' : 'left',
+      columns.forEach((column, index) => {
+        const value = getRowValue(row, column.key)
+        const lines = doc.splitTextToSize(value, widths[index])
+        doc.text(lines, x + positions[index] + (column.right ? widths[index] : 0), y, {
+          align: column.right ? 'right' : 'left',
         })
         rowHeight = Math.max(rowHeight, lines.length * rowSpacing)
       })
@@ -596,6 +730,13 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
           ]
 
     for (const group of groups) {
+      const columns = getPdfColumnsForGroup(group.key)
+      const columnWidths = calculateColumnWidths(columns, tableWidth)
+      const columnPositions = columnWidths.reduce<number[]>((acc, _, index) => {
+        if (index === 0) return [0]
+        return [...acc, acc[index - 1] + columnWidths[index - 1] + 6]
+      }, [])
+
       if (y > maxY - 60) {
         doc.addPage()
         y = margin
@@ -607,7 +748,7 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
       doc.text(`${group.title} — ${group.rows.length} entries • Amounts in ${currency}`, margin, y)
       y += 14
 
-      y = renderTableHeader(margin, y)
+      y = renderTableHeader(margin, y, columns, columnPositions, columnWidths)
 
       if (group.rows.length === 0) {
         doc.setFont('helvetica', 'normal')
@@ -618,29 +759,85 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
       }
 
       for (const row of group.rows) {
-        const rowHeight = measureRowHeight(row)
+        const rowHeight = measureRowHeight(row, columnWidths, columns)
         if (y + rowHeight > maxY) {
           doc.addPage()
           y = margin
-          y = renderTableHeader(margin, y)
+          y = renderTableHeader(margin, y, columns, columnPositions, columnWidths)
         }
-        y = renderTableRow(row, margin, y)
+        y = renderTableRow(row, margin, y, columnWidths, columnPositions, columns)
         y += 8
       }
 
       // subtotal for the group
       const totals = sumLedger(group.rows)
       const subtotalY = y + 6
+      const footerTextColor = group.key === 'sales' ? [5, 95, 70] : group.key === 'purchases' ? [17, 24, 39] : [153, 27, 27]
+      const textColorForKey = (key: string) => {
+        switch (key) {
+          case 'purchasePrice':
+            return [5, 95, 70]
+          case 'amount':
+            return [30, 64, 175]
+          case 'profit':
+            return [16, 185, 129]
+          case 'paid':
+            return [20, 83, 45]
+          case 'outstanding':
+            return [185, 28, 28]
+          default:
+            return footerTextColor
+        }
+      }
       doc.setDrawColor(226, 232, 240)
       doc.setLineWidth(0.5)
       doc.line(margin - 2, subtotalY, margin + tableWidth + 2, subtotalY)
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(10)
+      doc.setTextColor(footerTextColor[0], footerTextColor[1], footerTextColor[2])
       doc.text(`${group.title} Total`, margin + columnPositions[0], subtotalY + 12)
-      doc.text(formatNumberNoCurrency(totals.amount, currency), margin + columnPositions[5] + columnWidths[5], subtotalY + 12, { align: 'right' })
-      doc.text(formatNumberNoCurrency(totals.paid, currency), margin + columnPositions[6] + columnWidths[6], subtotalY + 12, { align: 'right' })
-      doc.text(formatNumberNoCurrency(totals.outstanding, currency), margin + columnPositions[7] + columnWidths[7], subtotalY + 12, { align: 'right' })
-      y = subtotalY + 22
+      const purchaseIndex = columns.findIndex((col) => col.key === 'purchasePrice')
+      const amountIndex = columns.findIndex((col) => col.key === 'amount')
+      const profitIndex = columns.findIndex((col) => col.key === 'profit')
+      const paidIndex = columns.findIndex((col) => col.key === 'paid')
+      const outstandingIndex = columns.findIndex((col) => col.key === 'outstanding')
+
+      if (purchaseIndex >= 0) {
+        const color = textColorForKey('purchasePrice')
+        doc.setTextColor(color[0], color[1], color[2])
+        doc.text(formatNumberNoCurrency(totals.purchase, currency), margin + columnPositions[purchaseIndex] + columnWidths[purchaseIndex], subtotalY + 12, {
+          align: 'right',
+        })
+      }
+      if (amountIndex >= 0) {
+        const color = textColorForKey('amount')
+        doc.setTextColor(color[0], color[1], color[2])
+        doc.text(formatNumberNoCurrency(totals.amount, currency), margin + columnPositions[amountIndex] + columnWidths[amountIndex], subtotalY + 12, {
+          align: 'right',
+        })
+      }
+      if (profitIndex >= 0) {
+        const color = textColorForKey('profit')
+        doc.setTextColor(color[0], color[1], color[2])
+        doc.text(formatNumberNoCurrency(totals.profit, currency), margin + columnPositions[profitIndex] + columnWidths[profitIndex], subtotalY + 12, {
+          align: 'right',
+        })
+      }
+      if (paidIndex >= 0) {
+        const color = textColorForKey('paid')
+        doc.setTextColor(color[0], color[1], color[2])
+        doc.text(formatNumberNoCurrency(totals.paid, currency), margin + columnPositions[paidIndex] + columnWidths[paidIndex], subtotalY + 12, {
+          align: 'right',
+        })
+      }
+      if (outstandingIndex >= 0) {
+        const color = textColorForKey('outstanding')
+        doc.setTextColor(color[0], color[1], color[2])
+        doc.text(formatNumberNoCurrency(totals.outstanding, currency), margin + columnPositions[outstandingIndex] + columnWidths[outstandingIndex], subtotalY + 12, {
+          align: 'right',
+        })
+      }
+      y = subtotalY + 34
     }
 
     const pdfBlob = doc.output('blob')
@@ -688,6 +885,11 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
 
         {groups.map((group) => {
           const totals = sumLedger(group.rows)
+          const showPurchaseColumn = group.key === 'sales'
+          const showUnitColumn = group.key === 'sales' || group.key === 'purchases'
+          const showQtyColumn = group.key === 'sales' || group.key === 'purchases'
+          const showProfitColumn = group.key === 'sales'
+          const headerColumns = 7 + (showPurchaseColumn ? 1 : 0) + (showUnitColumn ? 1 : 0) + (showQtyColumn ? 1 : 0) + (showProfitColumn ? 1 : 0)
           return (
             <div key={group.key} className="ledger-group">
               <div className="ledger-heading subsection-heading">
@@ -698,12 +900,15 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
                 <table className="ledger-table">
                   <thead>
                     <tr>
-                      <th>Date</th>
                       <th>Ref / ID</th>
                       <th>Description</th>
+                      {showPurchaseColumn && <th>Purchase</th>}
+                      {showUnitColumn && <th>Unit Price</th>}
+                      {showQtyColumn && <th>Qty</th>}
                       <th>Party</th>
                       <th>Payment</th>
                       <th>Amount</th>
+                      {showProfitColumn && <th>Profit</th>}
                       <th>Paid</th>
                       <th>Outstanding</th>
                     </tr>
@@ -711,24 +916,27 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
                   <tbody>
                     {group.rows.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="empty-row">
+                        <td colSpan={headerColumns} className="empty-row">
                           {group.empty}
                         </td>
                       </tr>
                     ) : (
                       group.rows.map((row, index) => (
                         <tr key={`${group.key}-${row.id}-${index}`} className={`ledger-row ledger-row-${getTransactionTone(row.type)}`}>
-                          <td>{row.date}</td>
                           <td>
                             <span className={`type-badge type-${getTransactionTone(row.type)}`}>{row.type}</span>
-                            <strong className="ledger-ref">{row.id}</strong>
+                            <strong className="ledger-ref">{formatDisplayId(row.id, row.type, row.description, row.date)}</strong>
                           </td>
                           <td className="ledger-description">{row.description}</td>
+                          {showPurchaseColumn && <td className="money-cell">{row.purchasePrice}</td>}
+                          {showUnitColumn && <td className="money-cell">{row.unitPrice}</td>}
+                          {showQtyColumn && <td>{row.quantity}</td>}
                           <td>{row.party}</td>
                           <td>
                             <span className={`payment-badge payment-${getPaymentTone(row.payment)}`}>{row.payment}</span>
                           </td>
                           <td className="money-cell">{row.amount}</td>
+                          {showProfitColumn && <td className="money-cell">{row.profit}</td>}
                           <td className="money-cell">{row.paid}</td>
                           <td className={`money-cell ${row.rawOutstanding > 0 ? 'outstanding-cell' : ''}`}>{row.outstanding}</td>
                         </tr>
@@ -737,17 +945,31 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
                   </tbody>
                   {group.rows.length > 0 && (
                     <tfoot>
-                      <tr className="ledger-total">
-                        <td colSpan={5}>
+                      <tr className={`ledger-total ledger-total-${group.key}`}>
+                        <td colSpan={3}>
                           <strong>{group.title} Total</strong>
                         </td>
-                        <td className="money-cell">
+                        {showPurchaseColumn && (
+                          <td className="money-cell footer-purchase">
+                            <strong>{formatAmount(totals.purchase)}</strong>
+                          </td>
+                        )}
+                        {showUnitColumn && <td />}
+                        {showQtyColumn && <td />}
+                        <td />
+                        <td />
+                        <td className="money-cell footer-amount">
                           <strong>{formatAmount(totals.amount)}</strong>
                         </td>
-                        <td className="money-cell">
+                        {showProfitColumn && (
+                          <td className="money-cell footer-profit">
+                            <strong>{formatAmount(totals.profit)}</strong>
+                          </td>
+                        )}
+                        <td className="money-cell footer-paid">
                           <strong>{formatAmount(totals.paid)}</strong>
                         </td>
-                        <td className="money-cell">
+                        <td className="money-cell footer-outstanding">
                           <strong>{formatAmount(totals.outstanding)}</strong>
                         </td>
                       </tr>

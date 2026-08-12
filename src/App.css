@@ -3251,7 +3251,7 @@ select {
 
 .ledger-group {
   display: grid;
-  gap: 10px;
+  gap: 20px;
 }
 
 .subsection-heading {
@@ -3360,7 +3360,6 @@ select {
 }
 
 .ledger-total td {
-  background: #eef4ff;
   color: #0f172a;
   font-weight: 700;
   border-bottom: 0;
