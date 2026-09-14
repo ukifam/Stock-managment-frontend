@@ -3,14 +3,14 @@ import type React from 'react'
 import { api, type InventoryRow, type InventoryUpdatePayload } from '../api'
 import { Topbar } from '../components/Topbar'
 import { ImportHelp } from '../components/ImportHelp'
-import type { ThemePageProps } from '../types'
+import type { PageRenderProps, ThemePageProps } from '../types'
 
 export const page = { id: 'inventory' as const, label: 'Inventory', icon: 'box' }
 import { exportRows } from '../utils/export'
 import { normalizeCsvRow, parseCsvFile, parseJsonFile } from '../utils/import'
 import { formatMoney } from '../utils/money'
 
-export function Inventory({ theme, toggleTheme }: ThemePageProps) {
+export function Inventory({ theme, toggleTheme, setPage }: Partial<PageRenderProps>) {
   const [rows, setRows] = useState<InventoryRow[]>([])
   const [selectedSku, setSelectedSku] = useState('')
   const [isEditing, setIsEditing] = useState(false)
@@ -128,6 +128,35 @@ export function Inventory({ theme, toggleTheme }: ThemePageProps) {
   return (
     <>
       <Topbar placeholder="Search Global Inventory..." theme={theme} toggleTheme={toggleTheme} />
+      <div style={{ padding: '1rem 1.5rem 0 1.5rem' }}>
+        <div className="subtabs-bar">
+          <button
+            type="button"
+            className="subtab-btn active"
+            onClick={() => setPage?.('inventory')}
+          >
+            <span className="subtab-icon">📦</span>
+            <span className="subtab-label">Products</span>
+            <span className="subtab-badge">{rows.length}</span>
+          </button>
+          <button
+            type="button"
+            className="subtab-btn"
+            onClick={() => setPage?.('stock-movements')}
+          >
+            <span className="subtab-icon">↕️</span>
+            <span className="subtab-label">Movements</span>
+          </button>
+          <button
+            type="button"
+            className="subtab-btn"
+            onClick={() => setPage?.('stock-adjustments')}
+          >
+            <span className="subtab-icon">✏️</span>
+            <span className="subtab-label">Adjustments</span>
+          </button>
+        </div>
+      </div>
       <div className="inventory-layout">
         <section className="inventory-content page-pad">
           <div className="inventory-title">
@@ -162,6 +191,7 @@ export function Inventory({ theme, toggleTheme }: ThemePageProps) {
           onEditToggle={() => setIsEditing((current) => !current)}
           onFieldChange={updateInventoryForm}
           onSave={handleSaveInventory}
+          setPage={setPage}
         />
       </div>
     </>
@@ -174,14 +204,24 @@ function InventoryTable({ rows, selectedSku, onSelect }: { rows: InventoryRow[];
       <table>
         <thead><tr><th>Date</th><th>Item Name</th><th>SKU</th><th>Category</th><th>Stock Level</th><th>Unit Price</th><th>Status</th></tr></thead>
         <tbody>
-          {rows.map((row) => (
-            <tr className={row.sku === selectedSku ? 'selected-row clickable-row' : 'clickable-row'} key={row.sku} onClick={() => onSelect(row.sku)}>
-              <td>{row.date}</td>
-              <td><strong>{row.item}</strong><span>{row.meta}</span></td>
-              <td>{row.sku}</td><td>{row.category}</td><td className={row.status === 'Low' ? 'danger' : ''}>{row.stock}</td><td>{row.price}</td>
-              <td><i className={row.status === 'Low' ? 'status low' : 'status'}>{row.status}</i></td>
-            </tr>
-          ))}
+          {rows.map((row) => {
+            const isOutOfStock = Number(row.rawStock ?? row.stock ?? 0) <= 0
+            const isLowStock = row.status === 'Low' || (!isOutOfStock && Number(row.rawStock ?? row.stock ?? 0) <= 5)
+            return (
+              <tr className={row.sku === selectedSku ? 'selected-row clickable-row' : 'clickable-row'} key={row.sku} onClick={() => onSelect(row.sku)}>
+                <td>{row.date}</td>
+                <td><strong>{row.item}</strong><span>{row.meta}</span></td>
+                <td>{row.sku}</td><td>{row.category}</td>
+                <td className={isOutOfStock ? 'danger' : isLowStock ? 'warning' : ''}>{row.stock}</td>
+                <td>{row.price}</td>
+                <td>
+                  <i className={isOutOfStock ? 'status danger' : isLowStock ? 'status low' : 'status'}>
+                    {isOutOfStock ? 'Out of Stock' : row.status}
+                  </i>
+                </td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>
@@ -214,6 +254,7 @@ function DetailPanel({
   onEditToggle,
   onFieldChange,
   onSave,
+  setPage,
 }: {
   row?: InventoryRow
   isEditing: boolean
@@ -221,6 +262,7 @@ function DetailPanel({
   onEditToggle: () => void
   onFieldChange: (field: keyof InventoryUpdatePayload, value: string) => void
   onSave: () => Promise<void>
+  setPage?: (page: any) => void
 }) {
   return (
     <aside className="detail-panel">
@@ -228,9 +270,31 @@ function DetailPanel({
       <div className="detail-image" />
       <h2>{row?.item ?? 'No item selected'}</h2>
       <p>SKU: {row?.sku ?? '-'} - SERIAL: #{row?.serial ?? '-'}</p>
-      <div className="detail-actions">
+      <div className="detail-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
         <button type="button" className="primary" disabled={!row}>Sell Item</button>
         <button type="button" onClick={onEditToggle} disabled={!row}>{isEditing ? 'Cancel' : 'Edit Item'}</button>
+        {setPage && (
+          <>
+            <button
+              type="button"
+              disabled={!row}
+              onClick={() => setPage('stock-adjustments')}
+              title="Record physical count or adjust stock"
+              style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', borderColor: 'rgba(59, 130, 246, 0.3)' }}
+            >
+              ⚖️ Stock Count
+            </button>
+            <button
+              type="button"
+              disabled={!row}
+              onClick={() => setPage('stock-movements')}
+              title="View stock movements ledger"
+              style={{ background: 'rgba(148, 163, 184, 0.15)', color: '#94a3b8', borderColor: 'rgba(148, 163, 184, 0.3)' }}
+            >
+              📋 Ledger
+            </button>
+          </>
+        )}
       </div>
       {row && isEditing ? (
         <form onSubmit={async (event) => { event.preventDefault(); await onSave() }}>
@@ -253,7 +317,10 @@ function DetailPanel({
             </label>
             <label>
               Stock
-              <input type="number" min="0" value={String(form.stock ?? '')} onChange={(event) => onFieldChange('stock', event.target.value)} />
+              <input type="number" min="0" value={String(form.stock ?? '')} readOnly disabled title="Use Stock Adjustments to change stock levels" style={{ opacity: 0.5, cursor: 'not-allowed' }} />
+              <small style={{ color: 'var(--text-tertiary, #888)', marginTop: '4px', display: 'block' }}>
+                ⚠️ Stock cannot be edited directly. Use <strong>Adjustments</strong> in the sidebar.
+              </small>
             </label>
             <label>
               Capacity

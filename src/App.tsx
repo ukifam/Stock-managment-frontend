@@ -63,6 +63,7 @@ function App() {
       <Sidebar page={page} setPage={setPage} onNewEntry={() => openEntryModal()} />
       <section className="workspace">
         {pageRegistry.find((entry) => entry.id === page)?.render({
+          page,
           theme,
           toggleTheme,
           openEntryModal,

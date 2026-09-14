@@ -349,6 +349,20 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
       credit: '-',
       outstanding: '-',
     },
+    {
+      category: 'Inventory Valuation',
+      total: reports.summary?.totalInventoryValuation ?? '-',
+      cash: `${reports.summary?.totalStockUnits ?? 0} units in stock`,
+      credit: `${reports.summary?.lowStockCount ?? 0} low stock`,
+      outstanding: `${reports.summary?.outOfStockCount ?? 0} out of stock`,
+    },
+    {
+      category: 'Stock Shrinkage / Loss',
+      total: reports.summary?.totalLossValue ?? '-',
+      cash: `${reports.summary?.totalLossUnits ?? 0} units lost/damaged`,
+      credit: '-',
+      outstanding: '-',
+    },
   ]
 
   const visibleSummaryRows =
@@ -1119,6 +1133,21 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
                     <strong>{reports.summary.totalExpenses ?? reports.summary.taxes ?? '-'}</strong>
                   </div>
                 </div>
+                <div className="summary-group-card inventory-group">
+                  <h3>Inventory & Assets</h3>
+                  <div className="summary-group-row">
+                    <span>Stock Asset Value</span>
+                    <strong>{reports.inventoryValuation?.totalValuation ?? reports.summary?.totalInventoryValuation ?? '-'}</strong>
+                  </div>
+                  <div className="summary-group-row">
+                    <span>Total Quantity</span>
+                    <strong>{reports.inventoryValuation?.totalUnits ?? reports.summary?.totalStockUnits ?? '-'} units</strong>
+                  </div>
+                  <div className="summary-group-row">
+                    <span>Stock Loss / Shrinkage</span>
+                    <strong style={{ color: '#f87171' }}>{reports.summary?.totalLossValue ?? '-'}</strong>
+                  </div>
+                </div>
               </div>
               <div className="report-profit-summary">
                 <article className={`summary-card result ${generalStatus.tone}`}>
@@ -1178,6 +1207,43 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
               </table>
             </div>
           </section>
+
+          {reports.stockDiscrepancies && reports.stockDiscrepancies.length > 0 && (
+            <section className="transaction-summary" style={{ marginTop: '2rem' }}>
+              <div className="section-title">
+                <h2>Stock Discrepancies & Shrinkage Audit</h2>
+                <p>Audited stock write-offs, physical count discrepancies, and damages affecting inventory value.</p>
+              </div>
+              <div className="table-shell">
+                <table className="summary-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Type</th>
+                      <th>Product / SKU</th>
+                      <th>Discrepancy (Units)</th>
+                      <th>Estimated Value Loss</th>
+                      <th>Reason / Notes</th>
+                      <th>Auditor</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reports.stockDiscrepancies.map((d, idx) => (
+                      <tr key={d._id || idx}>
+                        <td>{d.date}</td>
+                        <td><span className="type-badge type-expense">{d.type.replace('_', ' ')}</span></td>
+                        <td><strong>{d.item || d.sku}</strong> <small style={{ opacity: 0.7 }}>({d.sku})</small></td>
+                        <td style={{ color: '#ef4444', fontWeight: 700 }}>{d.quantity}</td>
+                        <td style={{ color: '#ef4444', fontWeight: 700 }}>{d.estimatedLoss || '-'}</td>
+                        <td>{d.reason || '-'}</td>
+                        <td>{d.user || 'System'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
 
           {renderLedgerTable()}
           </div>

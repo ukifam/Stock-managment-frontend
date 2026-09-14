@@ -1,4 +1,23 @@
-export type Page = 'dashboard' | 'inventory' | 'purchases' | 'sales' | 'reports' | 'settings' | 'expenses'
+export type Page =
+  | 'dashboard'
+  | 'inventory'
+  | 'stock-movements'
+  | 'stock-adjustments'
+  | 'purchases'
+  | 'purchase-items'
+  | 'purchases-report'
+  | 'sales'
+  | 'sale-items'
+  | 'sales-report'
+  | 'expenses'
+  | 'expense-items'
+  | 'expenses-report'
+  | 'loans'
+  | 'loans-given'
+  | 'loans-taken'
+  | 'loans-repayments'
+  | 'reports'
+  | 'settings'
 export type Theme = 'dark' | 'light'
 export type EntryType = 'purchase' | 'sale'
 export type EntryMode = 'scan' | 'manual'
@@ -13,6 +32,7 @@ export type ThemePageProps = {
 }
 
 export type PageRenderProps = ThemePageProps & {
+  page?: Page
   openEntryModal: (type?: EntryType) => void
   setPage: (page: Page) => void
   entryRequest: { type: EntryType; mode: EntryMode; id: number } | null

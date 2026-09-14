@@ -4,7 +4,9 @@ import { api, type AvailableItem, type EntryStatus, type SaleRow, type SaleUpdat
 import { Topbar } from '../components/Topbar'
 import { ImportHelp } from '../components/ImportHelp'
 import { CameraScanner } from '../components/CameraScanner'
-import type { EntryMode, ThemePageProps } from '../types'
+import { useMemo } from 'react'
+import { Reports } from './Reports'
+import type { EntryMode, Page, ThemePageProps } from '../types'
 
 export const page = { id: 'sales' as const, label: 'Sales', icon: 'tag' }
 import { exportRows } from '../utils/export'
@@ -30,6 +32,9 @@ function saleFormFromRow(row?: SaleRow): SaleUpdatePayload {
 import { normalizeCsvRow, parseCsvFile, parseJsonFile } from '../utils/import'
 
 type SalesProps = ThemePageProps & {
+  page?: Page
+  subTab?: 'all' | 'items' | 'report'
+  setPage?: (page: Page) => void
   startSelling?: boolean
   entryMode?: EntryMode
   onNewEntry?: () => void
@@ -44,7 +49,18 @@ type ScannedItem = {
   price: number
 }
 
-export function Sales({ theme, toggleTheme, startSelling = false, entryMode = 'scan', onNewEntry, currency = 'RWF', onOpenReport }: SalesProps) {
+export function Sales({
+  page,
+  subTab,
+  setPage,
+  theme,
+  toggleTheme,
+  startSelling = false,
+  entryMode = 'scan',
+  onNewEntry,
+  currency = 'RWF',
+  onOpenReport,
+}: SalesProps) {
   const [isSelling, setIsSelling] = useState(startSelling)
   const [rows, setRows] = useState<SaleRow[]>([])
   const [filterFrom, setFilterFrom] = useState('')
@@ -228,72 +244,175 @@ export function Sales({ theme, toggleTheme, startSelling = false, entryMode = 's
     setIsEditingSale((current) => !current)
   }
 
+  const currentTab: 'all' | 'items' | 'report' =
+    subTab || (page === 'sale-items' ? 'items' : page === 'sales-report' ? 'report' : 'all')
+
+  const handleTabSelect = (tab: 'all' | 'items' | 'report') => {
+    if (tab === 'all') setPage?.('sales')
+    else if (tab === 'items') setPage?.('sale-items')
+    else if (tab === 'report') setPage?.('sales-report')
+  }
+
+  const flattenedSaleItems = useMemo(() => {
+    const list: {
+      key: string
+      saleId: string
+      date: string
+      customer: string
+      item: string
+      sku: string
+      category: string
+      quantity: number
+      unitPrice: number
+      total: number
+      payment: string
+      status: string
+    }[] = []
+
+    rows.forEach((sale) => {
+      if (sale.lineItems && sale.lineItems.length > 0) {
+        sale.lineItems.forEach((it, idx) => {
+          list.push({
+            key: `${sale.id}-${it.sku || idx}-${it.item}`,
+            saleId: sale.id,
+            date: sale.date,
+            customer: sale.customer || 'Walk-in Customer',
+            item: it.item,
+            sku: it.sku || sale.sku || '-',
+            category: it.category || sale.category || 'General',
+            quantity: Number(it.quantity || 1),
+            unitPrice: Number(it.unitPrice || 0),
+            total: Number(it.total || (it.quantity * it.unitPrice) || 0),
+            payment: sale.payment || 'Cash',
+            status: sale.status || 'Completed',
+          })
+        })
+      } else {
+        const qty = Number(sale.rawQuantity || 1)
+        const val = Number(sale.rawValue || 0)
+        list.push({
+          key: `${sale.id}-main`,
+          saleId: sale.id,
+          date: sale.date,
+          customer: sale.customer || 'Walk-in Customer',
+          item: sale.item || 'General Item',
+          sku: sale.sku || '-',
+          category: sale.category || 'General',
+          quantity: qty,
+          unitPrice: qty > 0 ? val / qty : val,
+          total: val,
+          payment: sale.payment || 'Cash',
+          status: sale.status || 'Completed',
+        })
+      }
+    })
+
+    return list
+  }, [rows])
+
   if (!isSelling) {
     return (
       <>
         <Topbar placeholder="Search orders, serials..." theme={theme} toggleTheme={toggleTheme} />
-        <div className="list-detail-layout">
-          <section className="sales-list-page page-pad list-page">
-            <div className="inventory-title">
-              <div><h1>Sales & Checkout</h1><p>Review orders, carts, and checkout activity before scanning items.</p></div>
-              <div className="toolbar">
-                <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>From<input type="date" value={filterFrom} onChange={(event) => setFilterFrom(event.target.value)} /></label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>To<input type="date" value={filterTo} onChange={(event) => setFilterTo(event.target.value)} /></label>
-                <button type="button" onClick={() => { setAppliedFilterFrom(filterFrom); setAppliedFilterTo(filterTo) }}>Apply</button>
-                <button type="button" onClick={() => { setFilterFrom(''); setFilterTo(''); setAppliedFilterFrom(''); setAppliedFilterTo('') }}>Clear</button>
-                <button type="button" onClick={handleExport}>Export CSV</button>
-                {onOpenReport && (
-                  <button type="button" onClick={onOpenReport}>Sales Report</button>
-                )}
-                <button type="button" onClick={() => importInputRef.current?.click()} disabled={isImporting}>
-                  {isImporting ? 'Importing…' : 'Import'}
-                </button>
-                <button className="primary-action" type="button" onClick={onNewEntry ?? (() => setIsSelling(true))}>New Sale</button>
-                <input ref={importInputRef} type="file" accept=".csv,.json" hidden onChange={handleImportFile} />
-              </div>
-            </div>
-            <ImportHelp kind="sales" />
-            <div className="table-frame">
-              <table>
-                <thead><tr><th>Date</th><th>Sale ID</th><th>Item Name</th><th>Customer Name</th><th>Phone Number</th><th>Items</th><th>Net Value</th><th>Status</th></tr></thead>
-                <tbody>
-                  {rows.map((row) => (
-                    <tr className={row.id === selectedSale?.id ? 'selected-row clickable-row' : 'clickable-row'} key={row.id} onClick={() => setSelectedId(row.id)}>
-                      <td>{row.date}</td>
-                      <td><strong>{row.id}</strong><span>{row.payment} payment</span></td>
-                      <td>{row.item}</td><td>{row.customer}</td><td>{row.phone}</td><td>{row.items}</td><td>{row.value}</td>
-                      <td onClick={(event) => event.stopPropagation()}><StatusSelect value={row.status} onChange={(status) => handleStatusChange(row.id, status)} /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {importError && (
-              <div style={{ marginTop: '12px', color: importError.startsWith('Imported') ? '#1b5e20' : '#d32f2f' }}>
-                {importError}
-              </div>
-            )}
-            <div className="inventory-stats">
-              <div><span>Orders</span><strong>{rows.length}</strong></div>
-              <div><span>Filtered Total</span><strong>{formatMoney(filteredSalesTotal, currency)}</strong></div>
-              <div><span>Items Sold</span><strong>{filteredItemsSold}</strong></div>
-              <div><span>Given</span><strong>{rows.filter((row) => row.status === 'Given').length}</strong></div>
-              <div><span>Returned</span><strong>{rows.filter((row) => row.status === 'Returned').length}</strong></div>
-            </div>
-          </section>
-          <SaleDetailPanel
-            row={selectedSale}
-            isEditing={isEditingSale}
-            form={saleForm}
-            onEditToggle={toggleSaleEditing}
-            onFieldChange={handleSaleFormChange}
-            onSave={async () => {
-              if (selectedSale) {
-                await handleSaleUpdate(selectedSale.id, saleForm)
-              }
-            }}
-          />
+        <div style={{ padding: '1rem 1.5rem 0 1.5rem' }}>
+          <div className="subtabs-bar">
+            <button
+              type="button"
+              className={`subtab-btn ${currentTab === 'all' ? 'active' : ''}`}
+              onClick={() => handleTabSelect('all')}
+            >
+              <span className="subtab-icon">🏷️</span>
+              <span className="subtab-label">All Sales</span>
+              <span className="subtab-badge">{rows.length}</span>
+            </button>
+            <button
+              type="button"
+              className={`subtab-btn ${currentTab === 'items' ? 'active' : ''}`}
+              onClick={() => handleTabSelect('items')}
+            >
+              <span className="subtab-icon">📋</span>
+              <span className="subtab-label">Sale Items</span>
+              <span className="subtab-badge">{flattenedSaleItems.length}</span>
+            </button>
+            <button
+              type="button"
+              className={`subtab-btn ${currentTab === 'report' ? 'active' : ''}`}
+              onClick={() => handleTabSelect('report')}
+            >
+              <span className="subtab-icon">📊</span>
+              <span className="subtab-label">Sales Report</span>
+            </button>
+          </div>
         </div>
+
+        {currentTab === 'report' ? (
+          <Reports theme={theme} toggleTheme={toggleTheme} currency={currency} reportScope="sales" />
+        ) : currentTab === 'items' ? (
+          <SaleItemsView items={flattenedSaleItems} currency={currency} totalOrders={rows.length} />
+        ) : (
+          <div className="list-detail-layout">
+            <section className="sales-list-page page-pad list-page">
+              <div className="inventory-title">
+                <div><h1>Sales & Checkout</h1><p>Review orders, carts, and checkout activity before scanning items.</p></div>
+                <div className="toolbar">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>From<input type="date" value={filterFrom} onChange={(event) => setFilterFrom(event.target.value)} /></label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>To<input type="date" value={filterTo} onChange={(event) => setFilterTo(event.target.value)} /></label>
+                  <button type="button" onClick={() => { setAppliedFilterFrom(filterFrom); setAppliedFilterTo(filterTo) }}>Apply</button>
+                  <button type="button" onClick={() => { setFilterFrom(''); setFilterTo(''); setAppliedFilterFrom(''); setAppliedFilterTo('') }}>Clear</button>
+                  <button type="button" onClick={handleExport}>Export CSV</button>
+                  {onOpenReport && (
+                    <button type="button" onClick={onOpenReport}>Sales Report</button>
+                  )}
+                  <button type="button" onClick={() => importInputRef.current?.click()} disabled={isImporting}>
+                    {isImporting ? 'Importing…' : 'Import'}
+                  </button>
+                  <button className="primary-action" type="button" onClick={onNewEntry ?? (() => setIsSelling(true))}>New Sale</button>
+                  <input ref={importInputRef} type="file" accept=".csv,.json" hidden onChange={handleImportFile} />
+                </div>
+              </div>
+              <ImportHelp kind="sales" />
+              <div className="table-frame">
+                <table>
+                  <thead><tr><th>Date</th><th>Sale ID</th><th>Item Name</th><th>Customer Name</th><th>Phone Number</th><th>Items</th><th>Net Value</th><th>Status</th></tr></thead>
+                  <tbody>
+                    {rows.map((row) => (
+                      <tr className={row.id === selectedSale?.id ? 'selected-row clickable-row' : 'clickable-row'} key={row.id} onClick={() => setSelectedId(row.id)}>
+                        <td>{row.date}</td>
+                        <td><strong>{row.id}</strong><span>{row.payment} payment</span></td>
+                        <td>{row.item}</td><td>{row.customer}</td><td>{row.phone}</td><td>{row.items}</td><td>{row.value}</td>
+                        <td onClick={(event) => event.stopPropagation()}><StatusSelect value={row.status} onChange={(status) => handleStatusChange(row.id, status)} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {importError && (
+                <div style={{ marginTop: '12px', color: importError.startsWith('Imported') ? '#1b5e20' : '#d32f2f' }}>
+                  {importError}
+                </div>
+              )}
+              <div className="inventory-stats">
+                <div><span>Orders</span><strong>{rows.length}</strong></div>
+                <div><span>Filtered Total</span><strong>{formatMoney(filteredSalesTotal, currency)}</strong></div>
+                <div><span>Items Sold</span><strong>{filteredItemsSold}</strong></div>
+                <div><span>Given</span><strong>{rows.filter((row) => row.status === 'Given').length}</strong></div>
+                <div><span>Returned</span><strong>{rows.filter((row) => row.status === 'Returned').length}</strong></div>
+              </div>
+            </section>
+            <SaleDetailPanel
+              row={selectedSale}
+              isEditing={isEditingSale}
+              form={saleForm}
+              onEditToggle={toggleSaleEditing}
+              onFieldChange={handleSaleFormChange}
+              onSave={async () => {
+                if (selectedSale) {
+                  await handleSaleUpdate(selectedSale.id, saleForm)
+                }
+              }}
+            />
+          </div>
+        )}
       </>
     )
   }
@@ -506,21 +625,48 @@ function SaleDetailPanel({
           </div>
         </form>
       ) : (
-        <section>
-          <h3>Customer & Payment</h3>
-          <dl>
-            <div><dt>Customer</dt><dd>{row?.customer ?? '-'}</dd></div>
-            <div><dt>Phone</dt><dd>{row?.phone ?? '-'}</dd></div>
-            <div><dt>SKU / Barcode</dt><dd>{row?.sku || '-'}</dd></div>
-            <div><dt>Category</dt><dd>{row?.category ?? '-'}</dd></div>
-            <div><dt>Items</dt><dd>{row?.items ?? '-'}</dd></div>
-            <div><dt>Net Value</dt><dd>{row?.value ?? '-'}</dd></div>
-            <div><dt>Paid Amount</dt><dd>{row?.paidAmount ?? '-'}</dd></div>
-            <div><dt>Payment</dt><dd>{row?.payment ?? '-'}</dd></div>
-            <div><dt>Status</dt><dd>{row?.status ?? '-'}</dd></div>
-            <div><dt>Date</dt><dd>{row?.date ?? '-'}</dd></div>
-          </dl>
-        </section>
+        <>
+          {row?.lineItems && row.lineItems.length > 0 && (
+            <section>
+              <h3>Sale Items ({row.lineItems.length})</h3>
+              <div className="line-items-list">
+                {row.lineItems.map((li, i) => (
+                  <div className="line-item-row" key={`${li.sku ?? li.item}-${i}`}>
+                    <div className="line-item-main">
+                      <strong className="line-item-name">{li.item}</strong>
+                      {li.sku && <span className="line-item-sku">SKU: {li.sku}</span>}
+                    </div>
+                    <div className="line-item-calc">
+                      <span>{li.quantity} × {li.formattedUnitPrice}</span>
+                      <strong>{li.formattedTotal}</strong>
+                    </div>
+                  </div>
+                ))}
+                <div className="line-items-totals">
+                  {row.discount && row.discount !== 'RWF 0' && (
+                    <div><span>Discount</span><span>−{row.discount}</span></div>
+                  )}
+                  {row.tax && row.tax !== 'RWF 0' && (
+                    <div><span>Tax</span><span>+{row.tax}</span></div>
+                  )}
+                  <div className="line-items-total-row"><span>Total</span><strong>{row.value}</strong></div>
+                </div>
+              </div>
+            </section>
+          )}
+          <section>
+            <h3>Customer & Payment</h3>
+            <dl>
+              <div><dt>Customer</dt><dd>{row?.customer ?? '-'}</dd></div>
+              <div><dt>Phone</dt><dd>{row?.phone ?? '-'}</dd></div>
+              <div><dt>Paid Amount</dt><dd>{row?.paidAmount ?? '-'}</dd></div>
+              <div><dt>Outstanding</dt><dd>{row?.outstanding ?? '-'}</dd></div>
+              <div><dt>Payment</dt><dd>{row?.payment ?? '-'}</dd></div>
+              <div><dt>Status</dt><dd>{row?.status ?? '-'}</dd></div>
+              <div><dt>Date</dt><dd>{row?.date ?? '-'}</dd></div>
+            </dl>
+          </section>
+        </>
       )}
       {row?.extractedText && <section><h3>Scanned Image Text</h3><pre className="detail-extracted-text">{row.extractedText}</pre></section>}
     </aside>
@@ -537,4 +683,189 @@ function StatusSelect({ value, onChange }: { value: string; onChange: (status: E
     </select>
   )
 }
+
+type FlattenedSaleItem = {
+  key: string
+  saleId: string
+  date: string
+  customer: string
+  item: string
+  sku: string
+  category: string
+  quantity: number
+  unitPrice: number
+  total: number
+  payment: string
+  status: string
+}
+
+function SaleItemsView({
+  items,
+  currency,
+  totalOrders,
+}: {
+  items: FlattenedSaleItem[]
+  currency: string
+  totalOrders: number
+}) {
+  const [searchTerm, setSearchTerm] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('ALL')
+
+  const categories = useMemo(() => {
+    const set = new Set<string>()
+    items.forEach((it) => {
+      if (it.category) set.add(it.category)
+    })
+    return ['ALL', ...Array.from(set)]
+  }, [items])
+
+  const filteredItems = useMemo(() => {
+    return items.filter((it) => {
+      const matchesCategory = categoryFilter === 'ALL' || it.category === categoryFilter
+      const q = searchTerm.toLowerCase()
+      const matchesSearch =
+        !q ||
+        it.item.toLowerCase().includes(q) ||
+        it.sku.toLowerCase().includes(q) ||
+        it.customer.toLowerCase().includes(q) ||
+        it.saleId.toLowerCase().includes(q)
+      return matchesCategory && matchesSearch
+    })
+  }, [items, categoryFilter, searchTerm])
+
+  const totalSoldUnits = filteredItems.reduce((sum, it) => sum + it.quantity, 0)
+  const totalItemRevenue = filteredItems.reduce((sum, it) => sum + it.total, 0)
+  const distinctProductsCount = new Set(filteredItems.map((it) => it.item)).size
+
+  const handleExportItems = () => {
+    exportRows(
+      'sale_items.csv',
+      filteredItems.map((it) => ({
+        Date: it.date,
+        SaleID: it.saleId,
+        Customer: it.customer,
+        Item: it.item,
+        SKU: it.sku,
+        Category: it.category,
+        Quantity: it.quantity.toString(),
+        UnitPrice: it.unitPrice.toString(),
+        Total: it.total.toString(),
+        Payment: it.payment,
+        Status: it.status,
+      }))
+    )
+  }
+
+  return (
+    <div className="page-pad">
+      <div className="inventory-title">
+        <div>
+          <h1>Sale Items Breakdown</h1>
+          <p>Detailed view of all individual product line items sold across orders.</p>
+        </div>
+        <div className="toolbar">
+          <button type="button" onClick={handleExportItems}>
+            Export CSV
+          </button>
+        </div>
+      </div>
+
+      <div className="items-kpi-grid">
+        <div className="items-kpi-card">
+          <span>Total Items Sold</span>
+          <strong>{totalSoldUnits} Units</strong>
+        </div>
+        <div className="items-kpi-card">
+          <span>Distinct Products</span>
+          <strong>{distinctProductsCount} Products</strong>
+        </div>
+        <div className="items-kpi-card">
+          <span>Items Revenue</span>
+          <strong style={{ color: 'var(--cyan, #38bdf8)' }}>{formatMoney(totalItemRevenue, currency)}</strong>
+        </div>
+        <div className="items-kpi-card">
+          <span>Total Orders</span>
+          <strong>{totalOrders} Orders</strong>
+        </div>
+      </div>
+
+      <div className="items-search-bar">
+        <input
+          type="text"
+          className="items-search-input"
+          placeholder="Search items by product name, SKU, customer, or Sale ID..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+        <select
+          value={categoryFilter}
+          onChange={(e) => setCategoryFilter(e.target.value)}
+          style={{
+            height: '38px',
+            padding: '0 12px',
+            background: 'var(--panel, #141d2e)',
+            border: '1px solid var(--line, rgba(148, 163, 184, 0.2))',
+            borderRadius: 'var(--radius-sm, 8px)',
+            color: 'var(--text-strong, #f8fafc)',
+            font: '500 13px var(--display, system-ui)',
+          }}
+        >
+          {categories.map((c) => (
+            <option key={c} value={c}>
+              {c === 'ALL' ? 'All Categories' : c}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="table-frame">
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Sale ID</th>
+              <th>Customer</th>
+              <th>Product Name</th>
+              <th>SKU</th>
+              <th>Category</th>
+              <th>Quantity</th>
+              <th>Unit Price</th>
+              <th>Line Total</th>
+              <th>Payment</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredItems.length === 0 ? (
+              <tr>
+                <td colSpan={11} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                  No sale items found matching your filters.
+                </td>
+              </tr>
+            ) : (
+              filteredItems.map((it) => (
+                <tr key={it.key}>
+                  <td>{it.date}</td>
+                  <td><strong>{it.saleId}</strong></td>
+                  <td>{it.customer}</td>
+                  <td><strong>{it.item}</strong></td>
+                  <td><code>{it.sku}</code></td>
+                  <td><span className="pill">{it.category}</span></td>
+                  <td><strong>{it.quantity}</strong></td>
+                  <td>{formatMoney(it.unitPrice, currency)}</td>
+                  <td style={{ fontWeight: 700, color: 'var(--cyan, #38bdf8)' }}>
+                    {formatMoney(it.total, currency)}
+                  </td>
+                  <td>{it.payment}</td>
+                  <td><span className="status">{it.status}</span></td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 

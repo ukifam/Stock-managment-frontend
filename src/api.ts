@@ -18,6 +18,24 @@ export type Metric = {
   note?: string
 }
 
+export type LineItem = {
+  sku?: string
+  item: string
+  category?: string
+  quantity: number
+  unitPrice: number
+  total: number
+  formattedUnitPrice?: string
+  formattedTotal?: string
+}
+
+export type ExpenseLineItem = {
+  description: string
+  category?: string
+  amount: number
+  formattedAmount?: string
+}
+
 export type LowStockAlert = {
   name: string
   sku: string
@@ -69,11 +87,17 @@ export type PurchaseRow = {
   rawOutstanding?: number
   quantity: string
   unitPrice?: string
+  subtotal?: string
+  discount?: string
+  tax?: string
   value: string
   payment?: string
   paidAmount?: string
   outstanding?: string
   status: string
+  lineItems?: LineItem[]
+  itemSummary?: string
+  items?: string
 }
 
 export type SaleRow = {
@@ -90,11 +114,16 @@ export type SaleRow = {
   rawPaidAmount?: number
   rawOutstanding?: number
   items: string
+  subtotal?: string
+  discount?: string
+  tax?: string
   value: string
   payment: string
   paidAmount?: string
   outstanding?: string
   status: string
+  lineItems?: LineItem[]
+  itemSummary?: string
 }
 
 export type DashboardResponse = {
@@ -102,6 +131,43 @@ export type DashboardResponse = {
   salesBars: number[]
   lowStock: LowStockAlert[]
   catalog: CatalogItem[]
+}
+
+export type StockMovementRow = {
+  id?: string
+  _id?: string
+  date: string
+  sku: string
+  item?: string
+  type: string
+  quantity: number
+  previousStock: number
+  newStock: number
+  reason?: string
+  reference?: string
+  user?: string
+}
+
+export type StockDiscrepancyRow = StockMovementRow & {
+  estimatedLoss?: string
+}
+
+export type InventoryValuation = {
+  totalUnits: number
+  totalValuation: string
+  rawValuation?: number
+  lowStockCount: number
+  outOfStockCount: number
+}
+
+export type StockAdjustmentPayload = {
+  date?: string
+  sku: string
+  type: string
+  quantity: number | string
+  reason: string
+  reference?: string
+  user?: string
 }
 
 export type ListResponse<T> = {
@@ -171,7 +237,15 @@ export type ReportsResponse = {
     salesCash?: string
     salesOnCredit?: string
     totalPayments?: string
+    totalStockUnits?: number
+    totalInventoryValuation?: string
+    totalLossUnits?: number
+    totalLossValue?: string
+    lowStockCount?: number
+    outOfStockCount?: number
   }
+  inventoryValuation?: InventoryValuation
+  stockDiscrepancies?: StockDiscrepancyRow[]
 }
 
 export type SettingsResponse = {
@@ -294,7 +368,102 @@ export type ExpenseRow = {
   description?: string
   vendor?: string
   reference?: string
+  payment?: string
   status?: string
+  lineItems?: ExpenseLineItem[]
+  itemSummary?: string
+  item?: string
+  rawAmount?: number
+  value?: string
+}
+
+export type LoanType = 'GIVEN' | 'TAKEN'
+export type LoanStatus = 'ACTIVE' | 'PAID' | 'OVERDUE' | 'DEFAULTED'
+
+export type LoanRepayment = {
+  repaymentId: string
+  date: string
+  amount: number
+  paymentMethod?: string
+  reference?: string
+  notes?: string
+  recordedBy?: string
+  createdAt?: string
+}
+
+export type LoanRow = {
+  _id?: string
+  id: string
+  type: LoanType
+  partyName: string
+  partyType: string
+  phone?: string
+  email?: string
+  idNumber?: string
+  principalAmount: number
+  interestRate: number
+  interestAmount: number
+  totalAmount: number
+  totalRepaid: number
+  remainingBalance: number
+  startDate: string
+  dueDate: string
+  paymentMethod?: string
+  installmentType?: string
+  status: LoanStatus
+  purpose?: string
+  collateral?: string
+  notes?: string
+  repayments: LoanRepayment[]
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type LoanMetrics = {
+  given: {
+    principal: number
+    outstanding: number
+    repaid: number
+    activeCount: number
+  }
+  taken: {
+    principal: number
+    outstanding: number
+    repaid: number
+    activeCount: number
+  }
+  netPosition: number
+  overdueCount: number
+  totalLoans: number
+}
+
+export type CreateLoanPayload = {
+  id?: string
+  type: LoanType
+  partyName: string
+  partyType?: string
+  phone?: string
+  email?: string
+  idNumber?: string
+  principalAmount: number
+  interestRate?: number
+  interestAmount?: number
+  startDate?: string
+  dueDate?: string
+  paymentMethod?: string
+  installmentType?: string
+  purpose?: string
+  collateral?: string
+  notes?: string
+}
+
+export type RecordRepaymentPayload = {
+  amount: number
+  date?: string
+  paymentMethod?: string
+  reference?: string
+  notes?: string
+  recordedBy?: string
 }
 
 export type CreateExpensePayload = {
@@ -461,6 +630,20 @@ export const api = {
     method: 'PATCH',
     body: JSON.stringify(payload),
   }),
+  stockMovements: (sku?: string, page = 1, limit = 50, type?: string, search?: string) => {
+    const params = new URLSearchParams({
+      page: String(page),
+      limit: String(limit),
+    })
+    if (sku) params.set('sku', sku)
+    if (type && type !== 'ALL') params.set('type', type)
+    if (search) params.set('search', search)
+    return request<ListResponse<StockMovementRow>>(`/stock-movements?${params.toString()}`)
+  },
+  adjustStock: (payload: StockAdjustmentPayload) => request<StockMovementRow>('/stock-movements/adjust', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
   venues: () => request<ListResponse<VenueRow>>('/venues'),
   createVenue: (payload: VenueRow) => request<VenueRow>('/venues', {
     method: 'POST',
@@ -473,4 +656,28 @@ export const api = {
   deleteVenue: (code: string) => request<{ success: boolean }>(`/venues/${encodeURIComponent(code)}`, {
     method: 'DELETE',
   }),
+  loans: (type?: 'GIVEN' | 'TAKEN', status?: string, search?: string, page = 1, limit = 50) => {
+    const params = new URLSearchParams({ page: String(page), limit: String(limit) })
+    if (type) params.set('type', type)
+    if (status && status !== 'ALL') params.set('status', status)
+    if (search) params.set('search', search)
+    return request<ListResponse<LoanRow>>(`/loans?${params.toString()}`)
+  },
+  loan: (id: string) => request<LoanRow>(`/loans/${encodeURIComponent(id)}`),
+  createLoan: (payload: CreateLoanPayload) => request<LoanRow>('/loans', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  recordLoanRepayment: (id: string, payload: RecordRepaymentPayload) => request<LoanRow>(`/loans/${encodeURIComponent(id)}/repayments`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  updateLoan: (id: string, payload: Partial<CreateLoanPayload>) => request<LoanRow>(`/loans/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  }),
+  deleteLoan: (id: string) => request<{ success: boolean; id: string }>(`/loans/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  }),
+  loanMetrics: () => request<LoanMetrics>('/loans/metrics'),
 }
