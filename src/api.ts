@@ -3,6 +3,7 @@ import type { FilterPeriod } from './types'
 export type CreditFilter = 'all' | 'salesCredit' | 'purchasesCredit'
 
 const DEFAULT_API_URL = 'http://localhost:5000/api'
+const TOKEN_STORAGE_KEY = 'tri_ltd_auth_token'
 const API_URL = (() => {
   const configured = (import.meta.env.VITE_API_URL ?? DEFAULT_API_URL).trim()
   if (!configured) return DEFAULT_API_URL
@@ -82,6 +83,7 @@ export type PurchaseRow = {
   extractedText?: string
   rawQuantity?: number
   rawUnitPrice?: number
+  rawInventoryPrice?: number
   rawValue?: number
   rawPaidAmount?: number
   rawOutstanding?: number
@@ -264,6 +266,7 @@ export type ManualEntryPayload = {
   category: string
   quantity: string
   unitPrice: string
+  inventoryPrice?: string
   total: string
   sku: string
   extractedText?: string
@@ -281,6 +284,7 @@ export type PurchaseUpdatePayload = {
   category?: string
   quantity: string
   unitPrice: string
+  inventoryPrice?: string
   payment?: string
   paidAmount?: string
   status?: string
@@ -487,10 +491,16 @@ async function request<T>(path: string, options?: RequestInit & { timeoutMs?: nu
   const { timeoutMs, ...fetchOptions } = options ?? {}
   const controller = timeoutMs ? new AbortController() : undefined
   const timeoutId = timeoutMs ? window.setTimeout(() => controller?.abort(), timeoutMs) : undefined
+  const token = localStorage.getItem(TOKEN_STORAGE_KEY)
+  const headers = {
+    ...(fetchOptions.body ? { 'Content-Type': 'application/json' } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...fetchOptions.headers,
+  }
 
   try {
     const response = await fetch(`${API_URL}${path}`, {
-      headers: fetchOptions.body ? { 'Content-Type': 'application/json', ...fetchOptions.headers } : fetchOptions.headers,
+      headers,
       ...fetchOptions,
       signal: controller?.signal,
     })
@@ -555,6 +565,7 @@ export const api = {
       extractedText: payload.extractedText,
       quantity: payload.quantity,
       unitPrice: payload.unitPrice,
+      inventoryPrice: payload.inventoryPrice,
       payment: payload.payment || 'Cash',
       paidAmount: payload.paidAmount,
     }),
@@ -680,4 +691,27 @@ export const api = {
     method: 'DELETE',
   }),
   loanMetrics: () => request<LoanMetrics>('/loans/metrics'),
+  deleteInventory: (sku: string) => request<{ success: boolean }>(`/inventory/${encodeURIComponent(sku)}`, {
+    method: 'DELETE',
+  }),
+  deleteSale: (id: string) => request<{ success: boolean }>(`/sales/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  }),
+  deletePurchase: (id: string) => request<{ success: boolean }>(`/purchases/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  }),
+  deleteExpense: (id: string) => request<{ success: boolean }>(`/expenses/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  }),
+  login: (email: string, password: string) => request<{ token: string; user: { id: string; username: string; email: string; role: string } }>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password }),
+  }),
+  register: (username: string, email: string, password: string) => request<{ token: string; user: { id: string; username: string; email: string; role: string } }>('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ username, email, password }),
+  }),
+  me: (token: string) => request<{ id: string; username: string; email: string; role: string }>('/auth/me', {
+    headers: { Authorization: `Bearer ${token}` },
+  }),
 }

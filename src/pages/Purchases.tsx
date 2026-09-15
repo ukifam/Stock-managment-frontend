@@ -56,6 +56,7 @@ export function Purchases({
   const [manualBarcode, setManualBarcode] = useState('')
   const [manualQuantity, setManualQuantity] = useState('1')
   const [manualUnitPrice, setManualUnitPrice] = useState('0')
+  const [manualInventoryPrice, setManualInventoryPrice] = useState('0')
   const [manualSaving, setManualSaving] = useState(false)
   const [manualError, setManualError] = useState('')
   const [selectedId, setSelectedId] = useState('')
@@ -153,6 +154,21 @@ export function Purchases({
     setSelectedId(updated.id)
   }
 
+  const handleDeletePurchase = async (id: string) => {
+    const purchase = rows.find((r) => r.id === id)
+    if (!purchase) return
+    if (!window.confirm(`Are you sure you want to delete purchase "${purchase.id}" (${purchase.item})?`)) return
+
+    try {
+      await api.deletePurchase(id)
+      setRows((current) => current.filter((r) => r.id !== id))
+      setSelectedId('')
+      setImportError('Purchase deleted successfully.')
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Could not delete purchase.')
+    }
+  }
+
   const handleRemoveScannedItem = (sku: string) => {
     setScannedItems((current) => current.filter((item) => item.sku !== sku))
   }
@@ -221,6 +237,7 @@ export function Purchases({
             category: manualCategory,
             quantity: manualQuantity,
             unitPrice: manualUnitPrice,
+            inventoryPrice: manualInventoryPrice,
             total: String(Number(manualQuantity || 0) * Number(manualUnitPrice || 0)),
             sku: manualBarcode.trim(),
             payment: 'Cash',
@@ -239,6 +256,7 @@ export function Purchases({
       setManualBarcode('')
       setManualQuantity('1')
       setManualUnitPrice('0')
+      setManualInventoryPrice('0')
       setScannedItems([])
     } catch (error) {
       setManualError(error instanceof Error ? error.message : 'Could not save purchase.')
@@ -543,7 +561,11 @@ export function Purchases({
               <div><span>Returned</span><strong>{rows.filter((row) => row.status === 'Returned').length}</strong></div>
             </div>
           </section>
-          <PurchaseDetailPanel row={selectedPurchase} onUpdate={handlePurchaseUpdate} />
+          <PurchaseDetailPanel
+            row={selectedPurchase}
+            onUpdate={handlePurchaseUpdate}
+            onDelete={() => selectedPurchase && handleDeletePurchase(selectedPurchase.id)}
+          />
         </div>
       )}
     </>
@@ -560,11 +582,20 @@ type PurchaseEditForm = {
   category: string
   quantity: string
   unitPrice: string
+  inventoryPrice?: string
   status: string
   paidAmount?: string
 }
 
-function PurchaseDetailPanel({ row, onUpdate }: { row?: PurchaseRow; onUpdate: (id: string, payload: PurchaseUpdatePayload) => Promise<void> }) {
+function PurchaseDetailPanel({
+  row,
+  onUpdate,
+  onDelete,
+}: {
+  row?: PurchaseRow
+  onUpdate: (id: string, payload: PurchaseUpdatePayload) => Promise<void>
+  onDelete?: () => void
+}) {
   const [isEditing, setIsEditing] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState('')
@@ -608,6 +639,7 @@ function PurchaseDetailPanel({ row, onUpdate }: { row?: PurchaseRow; onUpdate: (
         category: form.category,
         quantity: form.quantity,
         unitPrice: form.unitPrice,
+        inventoryPrice: form.inventoryPrice,
         paidAmount: form.paidAmount,
         status: form.status,
         extractedText: row.extractedText,
@@ -627,9 +659,17 @@ function PurchaseDetailPanel({ row, onUpdate }: { row?: PurchaseRow; onUpdate: (
       <h2>{row?.item ?? 'No purchase selected'}</h2>
       <p>Purchase ID: {row?.id ?? '-'}</p>
       {row && !isEditing && (
-        <div className="detail-actions">
+        <div className="detail-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
           <button type="button" className="primary" onClick={() => setIsEditing(true)}>Edit Purchase</button>
           <button type="button" onClick={() => setForm(purchaseFormFromRow(row))}>Reset</button>
+          <button
+            type="button"
+            onClick={onDelete}
+            title="Delete this purchase"
+            style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+          >
+            🗑 Delete
+          </button>
         </div>
       )}
       {row && isEditing && (
@@ -668,6 +708,9 @@ function PurchaseDetailPanel({ row, onUpdate }: { row?: PurchaseRow; onUpdate: (
             </label>
             <label>Unit Price
               <input type="number" min="0" step="0.01" value={form.unitPrice} onChange={(event) => updateForm('unitPrice', event.target.value)} />
+            </label>
+            <label>Inventory Price
+              <input type="number" min="0" step="0.01" value={form.inventoryPrice ?? ''} onChange={(event) => updateForm('inventoryPrice', event.target.value)} />
             </label>
             <label>Paid Amount
               <input type="text" value={form.paidAmount ?? ''} onChange={(event) => updateForm('paidAmount', event.target.value)} />
@@ -739,6 +782,7 @@ function purchaseFormFromRow(row?: PurchaseRow): PurchaseEditForm {
     category: row?.category ?? '',
     quantity: String(row?.rawQuantity ?? 1),
     unitPrice: String(row?.rawUnitPrice ?? 0),
+    inventoryPrice: String(row?.rawInventoryPrice ?? row?.rawUnitPrice ?? 0),
     status: row?.status ?? 'Received',
     paidAmount: row?.paidAmount ?? '',
   }
@@ -818,9 +862,9 @@ function PurchaseItemsView({
         Item: it.item,
         SKU: it.sku,
         Category: it.category,
-        Quantity: it.quantity,
-        UnitPrice: it.unitPrice,
-        Total: it.total,
+        Quantity: String(it.quantity),
+        UnitPrice: String(it.unitPrice),
+        Total: String(it.total),
         Payment: it.payment,
         Status: it.status,
       }))

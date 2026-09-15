@@ -233,6 +233,22 @@ export function Sales({
     }
   }
 
+  const handleDeleteSale = async (id: string) => {
+    const sale = rows.find((r) => r.id === id)
+    if (!sale) return
+    if (!window.confirm(`Are you sure you want to delete sale "${sale.id}" (${sale.item || 'Sale'})?`)) return
+
+    try {
+      await api.deleteSale(id)
+      setRows((current) => current.filter((r) => r.id !== id))
+      setSelectedId('')
+      setIsEditingSale(false)
+      setImportError('Sale deleted successfully.')
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Could not delete sale.')
+    }
+  }
+
   const handleSaleFormChange = (field: keyof SaleUpdatePayload, value: string) => {
     setSaleForm((current) => ({ ...current, [field]: value }))
   }
@@ -410,6 +426,7 @@ export function Sales({
                   await handleSaleUpdate(selectedSale.id, saleForm)
                 }
               }}
+              onDelete={() => selectedSale && handleDeleteSale(selectedSale.id)}
             />
           </div>
         )}
@@ -552,6 +569,7 @@ function SaleDetailPanel({
   onEditToggle,
   onFieldChange,
   onSave,
+  onDelete,
 }: {
   row?: SaleRow
   isEditing: boolean
@@ -559,6 +577,7 @@ function SaleDetailPanel({
   onEditToggle: () => void
   onFieldChange: (field: keyof SaleUpdatePayload, value: string) => void
   onSave: () => Promise<void>
+  onDelete?: () => void
 }) {
   return (
     <aside className="detail-panel transaction-detail">
@@ -566,9 +585,18 @@ function SaleDetailPanel({
       <div className="detail-image" />
       <h2>{row?.item ?? 'No sale selected'}</h2>
       <p>Sale ID: {row?.id ?? '-'}</p>
-      <div className="detail-actions">
+      <div className="detail-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
         <button type="button" className="primary" disabled={!row} onClick={onEditToggle}>
           {isEditing ? 'Cancel Edit' : 'Edit Sale'}
+        </button>
+        <button
+          type="button"
+          disabled={!row}
+          onClick={onDelete}
+          title="Delete this sale"
+          style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+        >
+          🗑 Delete
         </button>
       </div>
       {row && isEditing ? (

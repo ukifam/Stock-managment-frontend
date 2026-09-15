@@ -4,7 +4,7 @@ import type { PageDefinition, PageRenderProps } from '../types'
 
 type AdjustmentMode = 'count' | 'quick'
 
-export function StockAdjustments({ theme, setPage }: PageRenderProps) {
+export function StockAdjustments({ setPage }: PageRenderProps) {
   const [inventoryItems, setInventoryItems] = useState<InventoryRow[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)

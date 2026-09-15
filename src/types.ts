@@ -1,4 +1,7 @@
 export type Page =
+  | 'landing'
+  | 'login'
+  | 'register'
   | 'dashboard'
   | 'inventory'
   | 'stock-movements'

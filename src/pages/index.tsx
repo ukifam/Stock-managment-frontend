@@ -8,9 +8,36 @@ import { Reports, page as reportsPage } from './Reports'
 import { Settings, page as settingsPage } from './Settings'
 import { StockMovements, page as stockMovementsPage } from './StockMovements'
 import { StockAdjustments, page as stockAdjustmentsPage } from './StockAdjustments'
+import { Landing } from './Landing'
+import { Login } from './Login'
+import { Register } from './Register'
 import type { PageDefinition } from '../types'
 
 export const pageRegistry: PageDefinition[] = [
+  {
+    id: 'landing',
+    label: 'Home',
+    icon: 'home',
+    render: ({ theme, toggleTheme, setPage }) => (
+      <Landing theme={theme} toggleTheme={toggleTheme} setPage={setPage} />
+    ),
+  },
+  {
+    id: 'login',
+    label: 'Sign In',
+    icon: 'lock',
+    render: ({ theme, toggleTheme, setPage }) => (
+      <Login theme={theme} toggleTheme={toggleTheme} setPage={setPage} />
+    ),
+  },
+  {
+    id: 'register',
+    label: 'Sign Up',
+    icon: 'user-plus',
+    render: ({ theme, toggleTheme, setPage }) => (
+      <Register theme={theme} toggleTheme={toggleTheme} setPage={setPage} />
+    ),
+  },
   {
     ...dashboardPage,
     render: ({ theme, toggleTheme, openEntryModal }) => (

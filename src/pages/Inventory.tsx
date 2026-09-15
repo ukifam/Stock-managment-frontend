@@ -3,14 +3,14 @@ import type React from 'react'
 import { api, type InventoryRow, type InventoryUpdatePayload } from '../api'
 import { Topbar } from '../components/Topbar'
 import { ImportHelp } from '../components/ImportHelp'
-import type { PageRenderProps, ThemePageProps } from '../types'
+import type { PageRenderProps } from '../types'
 
 export const page = { id: 'inventory' as const, label: 'Inventory', icon: 'box' }
 import { exportRows } from '../utils/export'
 import { normalizeCsvRow, parseCsvFile, parseJsonFile } from '../utils/import'
 import { formatMoney } from '../utils/money'
 
-export function Inventory({ theme, toggleTheme, setPage }: Partial<PageRenderProps>) {
+export function Inventory({ theme = 'dark', toggleTheme = () => {}, setPage }: Partial<PageRenderProps>) {
   const [rows, setRows] = useState<InventoryRow[]>([])
   const [selectedSku, setSelectedSku] = useState('')
   const [isEditing, setIsEditing] = useState(false)
@@ -27,8 +27,9 @@ export function Inventory({ theme, toggleTheme, setPage }: Partial<PageRenderPro
   }, [])
 
   const selectedRow = rows.find((row) => row.sku === selectedSku) ?? rows[0]
-  const totalStockUnits = rows.reduce((sum, row) => sum + Number(row.rawStock ?? row.stock ?? 0), 0)
-  const totalInventoryValue = rows.reduce((sum, row) => sum + Number(row.rawStock ?? row.stock ?? 0) * Number(row.rawPrice ?? row.price ?? 0), 0)
+  const availableRows = rows.filter((row) => getStockUnits(row) > 0)
+  const totalStockUnits = availableRows.reduce((sum, row) => sum + getStockUnits(row), 0)
+  const totalInventoryValue = availableRows.reduce((sum, row) => sum + getStockUnits(row) * getUnitPrice(row), 0)
 
   useEffect(() => {
     setInventoryForm(inventoryFormFromRow(selectedRow))
@@ -47,6 +48,21 @@ export function Inventory({ theme, toggleTheme, setPage }: Partial<PageRenderPro
       setImportError('Inventory item updated successfully.')
     } catch (error) {
       setImportError(error instanceof Error ? error.message : 'Could not update inventory item')
+    }
+  }
+
+  const handleDeleteInventory = async () => {
+    if (!selectedRow) return
+    if (!window.confirm(`Are you sure you want to delete "${selectedRow.item}" (${selectedRow.sku})?`)) return
+
+    try {
+      await api.deleteInventory(selectedRow.sku)
+      setRows((current) => current.filter((row) => row.sku !== selectedRow.sku))
+      setSelectedSku('')
+      setIsEditing(false)
+      setImportError('Inventory item deleted successfully.')
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : 'Could not delete inventory item')
     }
   }
 
@@ -177,9 +193,9 @@ export function Inventory({ theme, toggleTheme, setPage }: Partial<PageRenderPro
             </div>
           )}
           <div className="inventory-stats">
-            <div><span>Items</span><strong>{rows.length}</strong></div>
-            <div><span>Total Stock</span><strong>{totalStockUnits}</strong></div>
-            <div><span>Inventory Value</span><strong>{formatMoney(totalInventoryValue)}</strong></div>
+            <div><span>Available Items</span><strong>{availableRows.length}</strong></div>
+            <div><span>Available Stock</span><strong>{totalStockUnits}</strong></div>
+            <div><span>Available Items Value</span><strong>{formatMoney(totalInventoryValue)}</strong></div>
             <div><span>Low Stock</span><strong>{rows.filter((row) => row.status === 'Low').length}</strong></div>
             <div><span>Out of Stock</span><strong>{rows.filter((row) => row.status.includes('Out')).length}</strong></div>
           </div>
@@ -191,11 +207,20 @@ export function Inventory({ theme, toggleTheme, setPage }: Partial<PageRenderPro
           onEditToggle={() => setIsEditing((current) => !current)}
           onFieldChange={updateInventoryForm}
           onSave={handleSaveInventory}
+          onDelete={handleDeleteInventory}
           setPage={setPage}
         />
       </div>
     </>
   )
+}
+
+function getStockUnits(row: InventoryRow) {
+  return Number.isFinite(row.rawStock) ? Math.max(0, row.rawStock) : 0
+}
+
+function getUnitPrice(row: InventoryRow) {
+  return Number.isFinite(row.rawPrice) ? Math.max(0, row.rawPrice) : 0
 }
 
 function InventoryTable({ rows, selectedSku, onSelect }: { rows: InventoryRow[]; selectedSku: string; onSelect: (sku: string) => void }) {
@@ -254,6 +279,7 @@ function DetailPanel({
   onEditToggle,
   onFieldChange,
   onSave,
+  onDelete,
   setPage,
 }: {
   row?: InventoryRow
@@ -262,6 +288,7 @@ function DetailPanel({
   onEditToggle: () => void
   onFieldChange: (field: keyof InventoryUpdatePayload, value: string) => void
   onSave: () => Promise<void>
+  onDelete: () => void
   setPage?: (page: any) => void
 }) {
   return (
@@ -295,6 +322,15 @@ function DetailPanel({
             </button>
           </>
         )}
+        <button
+          type="button"
+          disabled={!row}
+          onClick={onDelete}
+          title="Delete this inventory item"
+          style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+        >
+          🗑 Delete
+        </button>
       </div>
       {row && isEditing ? (
         <form onSubmit={async (event) => { event.preventDefault(); await onSave() }}>

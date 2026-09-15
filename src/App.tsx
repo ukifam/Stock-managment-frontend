@@ -3,11 +3,16 @@ import { EntryFlowModal } from './components/EntryFlowModal'
 import { api, type ManualEntryPayload } from './api'
 import { Sidebar } from './components/Sidebar'
 import { pageRegistry } from './pages'
+import { AuthProvider, useAuth } from './context/AuthContext'
 import type { EntryMode, EntryType, Page, ReportScope, Theme } from './types'
 import './App.css'
 
-function App() {
-  const [page, setPage] = useState<Page>('dashboard')
+function AppContent() {
+  const { isAuthenticated } = useAuth()
+  const [page, setPage] = useState<Page>(() => {
+    const hasToken = localStorage.getItem('tri_ltd_auth_token')
+    return hasToken ? 'dashboard' : 'landing'
+  })
   const [theme, setTheme] = useState<Theme>('dark')
   const [currency, setCurrency] = useState('RWF')
   const [isEntryModalOpen, setIsEntryModalOpen] = useState(false)
@@ -16,6 +21,13 @@ function App() {
   const [listRefreshId, setListRefreshId] = useState(0)
   const [reportScope, setReportScope] = useState<ReportScope>('all')
   const isLight = theme === 'light'
+
+  useEffect(() => {
+    const isPublic = page === 'landing' || page === 'login' || page === 'register'
+    if (!isAuthenticated && !isPublic) {
+      setPage('landing')
+    }
+  }, [isAuthenticated, page])
 
   useEffect(() => {
     api.settings().then((settings) => setCurrency(settings.financial.currency)).catch(() => undefined)
@@ -58,27 +70,49 @@ function App() {
     setPage(type === 'purchase' ? 'purchases' : 'sales')
   }
 
+  const isPublicPage = page === 'landing' || page === 'login' || page === 'register'
+
+  const activePageDef = pageRegistry.find((entry) => entry.id === page)
+
+  const pageProps = {
+    page,
+    theme,
+    toggleTheme,
+    openEntryModal,
+    setPage,
+    entryRequest,
+    currency,
+    isLight,
+    onCurrencyChange: setCurrency,
+    listRefreshId,
+    reportScope,
+    setReportScope,
+  }
+
+  if (isPublicPage) {
+    return (
+      <div className={`public-shell ${theme}`}>
+        {activePageDef?.render(pageProps)}
+      </div>
+    )
+  }
+
   return (
     <main className={`shell ${theme} ${page === 'reports' ? 'reports-mode' : ''}`}>
       <Sidebar page={page} setPage={setPage} onNewEntry={() => openEntryModal()} />
       <section className="workspace">
-        {pageRegistry.find((entry) => entry.id === page)?.render({
-          page,
-          theme,
-          toggleTheme,
-          openEntryModal,
-          setPage,
-          entryRequest,
-          currency,
-          isLight,
-          onCurrencyChange: setCurrency,
-          listRefreshId,
-          reportScope,
-          setReportScope,
-        })}
+        {activePageDef?.render(pageProps)}
       </section>
       {isEntryModalOpen && <EntryFlowModal initialType={entryModalType} currency={currency} onClose={closeEntryModal} onSubmit={handleEntrySubmit} />}
     </main>
+  )
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   )
 }
 

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { pageRegistry } from '../pages'
 import type { Page } from '../types'
+import { useAuth } from '../context/AuthContext'
 
 type SidebarProps = {
   page: Page
@@ -87,6 +88,7 @@ const NAV_GROUPS: NavGroupConfig[] = [
 ]
 
 export function Sidebar({ page, setPage, onNewEntry }: SidebarProps) {
+  const { isAuthenticated, user, logout } = useAuth()
   // Track open state for each group
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {}
@@ -207,9 +209,39 @@ export function Sidebar({ page, setPage, onNewEntry }: SidebarProps) {
         )}
       </nav>
 
-      <button className="new-entry" type="button" onClick={onNewEntry}>
-        <span aria-hidden="true">+</span> New Entry
-      </button>
+      <div className="sidebar-footer" style={{ marginTop: 'auto', paddingTop: '1rem', borderTop: '1px solid var(--line)' }}>
+        {isAuthenticated && user && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem', padding: '0 0.25rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+              <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'linear-gradient(135deg, #3b82f6, #6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 'bold', color: '#fff', flexShrink: 0 }}>
+                {user.username.slice(0, 2).toUpperCase()}
+              </div>
+              <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-strong, #fff)' }}>{user.username}</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted, #94a3b8)' }}>{user.role}</div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => { logout(); setPage('landing') }}
+              title="Sign Out"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', fontSize: '15px' }}
+            >
+              🚪
+            </button>
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => setPage('landing')}
+          style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '8px', padding: '8px', borderRadius: '6px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--line)', color: 'var(--text-muted, #94a3b8)', cursor: 'pointer', fontSize: '12px', marginBottom: '8px' }}
+        >
+          <span>🏠</span> Home / Landing
+        </button>
+        <button className="new-entry" type="button" onClick={onNewEntry}>
+          <span aria-hidden="true">+</span> New Entry
+        </button>
+      </div>
     </aside>
   )
 }

@@ -304,6 +304,7 @@ function ManualEntryModal({ initialType, currency = 'RWF', mode, onBack, onClose
   const [type, setType] = useState<EntryType>(initialType ?? 'purchase')
   const [quantity, setQuantity] = useState(1)
   const [unitPrice, setUnitPrice] = useState(0)
+  const [inventoryPrice, setInventoryPrice] = useState(0)
   const [payment, setPayment] = useState('Cash')
   const [paidAmount, setPaidAmount] = useState('0')
   const [inventory, setInventory] = useState<InventoryRow[]>([])
@@ -355,6 +356,7 @@ function ManualEntryModal({ initialType, currency = 'RWF', mode, onBack, onClose
           category: saleItem?.category ?? String(form.get('category') || ''),
           quantity: String(form.get('quantity') || '1'),
           unitPrice: String(unitPrice),
+          inventoryPrice: isPurchase ? String(inventoryPrice) : undefined,
           total: String(total),
           sku: saleItem?.sku ?? String(form.get('sku') || ''),
           payment,
@@ -417,6 +419,11 @@ function ManualEntryModal({ initialType, currency = 'RWF', mode, onBack, onClose
           <label>Unit Price
             <input name="unitPrice" type="number" min="0" step="0.01" value={unitPrice} onChange={(event) => setUnitPrice(Number(event.target.value) || 0)} />
           </label>
+          {isPurchase && (
+            <label>Inventory Price
+              <input name="inventoryPrice" type="number" min="0" step="0.01" value={inventoryPrice} onChange={(event) => setInventoryPrice(Number(event.target.value) || 0)} />
+            </label>
+          )}
           <label>Total
             <input name="total" value={formatMoney(total, currency)} readOnly />
           </label>

@@ -211,6 +211,19 @@ export function Expenses({
     setModalOpen(true)
   }
 
+  const handleDeleteExpense = async (expense: ExpenseRow) => {
+    const id = expense.id || expense._id?.toString()
+    if (!id) return
+    if (!window.confirm(`Are you sure you want to delete this expense (${expense.description || expense.category} - ${expense.amount})?`)) return
+
+    try {
+      await api.deleteExpense(id)
+      setRows((current) => current.filter((r) => (r.id !== id && r._id?.toString() !== id)))
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Could not delete expense')
+    }
+  }
+
   const flattenedExpenseItems = useMemo(() => {
     const list: FlattenedExpenseItem[] = []
 
@@ -348,9 +361,19 @@ export function Expenses({
                       <td><code>{row.reference || '-'}</code></td>
                       <td>{row.description}</td>
                       <td>
-                        <button type="button" onClick={() => openEditExpense(row)}>
-                          Edit
-                        </button>
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <button type="button" onClick={() => openEditExpense(row)}>
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteExpense(row)}
+                            style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+                            title="Delete expense"
+                          >
+                            🗑
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -423,7 +446,7 @@ function ExpenseItemsView({
         Vendor: it.vendor,
         Category: it.category,
         Description: it.description,
-        Amount: it.amount,
+        Amount: String(it.amount),
         Payment: it.payment,
         Status: it.status,
       }))

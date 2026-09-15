@@ -1208,43 +1208,6 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
             </div>
           </section>
 
-          {reports.stockDiscrepancies && reports.stockDiscrepancies.length > 0 && (
-            <section className="transaction-summary" style={{ marginTop: '2rem' }}>
-              <div className="section-title">
-                <h2>Stock Discrepancies & Shrinkage Audit</h2>
-                <p>Audited stock write-offs, physical count discrepancies, and damages affecting inventory value.</p>
-              </div>
-              <div className="table-shell">
-                <table className="summary-table">
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Type</th>
-                      <th>Product / SKU</th>
-                      <th>Discrepancy (Units)</th>
-                      <th>Estimated Value Loss</th>
-                      <th>Reason / Notes</th>
-                      <th>Auditor</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {reports.stockDiscrepancies.map((d, idx) => (
-                      <tr key={d._id || idx}>
-                        <td>{d.date}</td>
-                        <td><span className="type-badge type-expense">{d.type.replace('_', ' ')}</span></td>
-                        <td><strong>{d.item || d.sku}</strong> <small style={{ opacity: 0.7 }}>({d.sku})</small></td>
-                        <td style={{ color: '#ef4444', fontWeight: 700 }}>{d.quantity}</td>
-                        <td style={{ color: '#ef4444', fontWeight: 700 }}>{d.estimatedLoss || '-'}</td>
-                        <td>{d.reason || '-'}</td>
-                        <td>{d.user || 'System'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          )}
-
           {renderLedgerTable()}
           </div>
 
