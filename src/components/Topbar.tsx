@@ -2,6 +2,7 @@ import { useEffect, useState, type KeyboardEvent } from 'react'
 import { api, type GlobalSearchResult } from '../api'
 import { GLOBAL_SEARCH_NAVIGATION_EVENT } from '../types'
 import type { Theme } from '../types'
+import { useAuth } from '../context/AuthContext'
 
 type TopbarProps = {
   title?: string
@@ -18,11 +19,19 @@ export function Topbar({
   toggleTheme,
   minimal = false,
 }: TopbarProps) {
+  const { user } = useAuth()
   const [searchValue, setSearchValue] = useState('')
   const [searchResults, setSearchResults] = useState<GlobalSearchResult[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
   const [searchError, setSearchError] = useState('')
   const normalizedQuery = searchValue.trim()
+  const userInitials = String(user?.username || 'User')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join('') || 'U'
 
   useEffect(() => {
     if (normalizedQuery.length < 2) return
@@ -133,8 +142,8 @@ export function Topbar({
             <button type="button" aria-label="Notifications" className="icon-button bell" />
             <button type="button" aria-label="Help" className="icon-button help" />
             <button type="button" aria-label="Apps" className="icon-button apps" />
-            <div className="operator" aria-label="System operator">
-              <span>JD</span>
+            <div className="operator" aria-label={`Signed in as ${user?.username || 'user'}`} title={user?.username || 'User'}>
+              <span>{userInitials}</span>
             </div>
           </>
         )}
