@@ -220,11 +220,11 @@ export function Inventory({ theme = 'dark', toggleTheme = () => {}, setPage }: P
             </div>
           )}
           <div className="inventory-stats">
-            <div><span>Available Items on Page</span><strong>{availableRows.length}</strong></div>
-            <div><span>Available Stock on Page</span><strong>{totalStockUnits}</strong></div>
+            <div><span>Available Items</span><strong>{availableRows.length}</strong></div>
+            <div><span>Available Stock</span><strong>{totalStockUnits}</strong></div>
             <div><span>Page Inventory Value</span><strong>{formatMoney(totalInventoryValue)}</strong></div>
-            <div><span>Low Stock on Page</span><strong>{rows.filter((row) => row.status === 'Low').length}</strong></div>
-            <div><span>Out of Stock on Page</span><strong>{rows.filter((row) => row.status.includes('Out')).length}</strong></div>
+            <div><span>Low Stock</span><strong>{rows.filter((row) => row.status === 'Low').length}</strong></div>
+            <div><span>Out of Stock</span><strong>{rows.filter((row) => row.status.includes('Out')).length}</strong></div>
           </div>
         </section>
         <DetailPanel
