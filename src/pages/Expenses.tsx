@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type React from 'react'
 import { Topbar } from '../components/Topbar'
+import { PaginationControls } from '../components/PaginationControls'
 import { api, type CreateExpensePayload, type ExpenseRow, type ExpenseUpdatePayload } from '../api'
 import { Reports } from './Reports'
 import { exportRows } from '../utils/export'
@@ -138,8 +139,12 @@ export function Expenses({
   onOpenReport,
 }: ExpensesProps) {
   const [rows, setRows] = useState<ExpenseRow[]>([])
-  const [limit] = useState(50)
-  const [loading, setLoading] = useState(false)
+  const [pageNumber, setPageNumber] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
+  const [totalCount, setTotalCount] = useState(0)
+  const [totalPages, setTotalPages] = useState(0)
+  const [listRevision, setListRevision] = useState(0)
+  const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null)
@@ -156,21 +161,25 @@ export function Expenses({
     else if (tab === 'report') setPage?.('expenses-report')
   }
 
-  const load = async () => {
-    setLoading(true)
-    try {
-      const response = await api.expenses(1, limit)
-      setRows(response.rows)
-    } catch {
-      setRows([])
-    } finally {
-      setLoading(false)
-    }
-  }
-
   useEffect(() => {
-    load()
-  }, [])
+    let isMounted = true
+    api.expenses(pageNumber, pageSize)
+      .then((response) => {
+        if (!isMounted) return
+        setRows(response.rows)
+        setTotalCount(response.count)
+        setTotalPages(response.totalPages ?? 0)
+        const lastPage = Math.max(1, response.totalPages ?? 1)
+        if (pageNumber > lastPage) setPageNumber(lastPage)
+      })
+      .catch(() => {
+        if (isMounted) setRows([])
+      })
+      .finally(() => {
+        if (isMounted) setLoading(false)
+      })
+    return () => { isMounted = false }
+  }, [pageNumber, pageSize, listRevision])
 
   const handleCreateOrUpdate = async () => {
     setSubmitting(true)
@@ -183,7 +192,8 @@ export function Expenses({
       resetForm()
       setModalOpen(false)
       setEditingExpenseId(null)
-      load()
+      setPageNumber(1)
+      setListRevision((current) => current + 1)
     } catch (error) {
       window.alert(error instanceof Error ? error.message : 'Could not save expense')
     } finally {
@@ -219,6 +229,7 @@ export function Expenses({
     try {
       await api.deleteExpense(id)
       setRows((current) => current.filter((r) => (r.id !== id && r._id?.toString() !== id)))
+      setListRevision((current) => current + 1)
     } catch (err) {
       window.alert(err instanceof Error ? err.message : 'Could not delete expense')
     }
@@ -289,7 +300,7 @@ export function Expenses({
           >
             <span className="subtab-icon">🧾</span>
             <span className="subtab-label">All Expenses</span>
-            <span className="subtab-badge">{rows.length}</span>
+            <span className="subtab-badge">{totalCount}</span>
           </button>
           <button
             type="button"
@@ -380,6 +391,14 @@ export function Expenses({
                 </tbody>
               </table>
             )}
+            <PaginationControls
+              page={pageNumber}
+              pageSize={pageSize}
+              totalCount={totalCount}
+              totalPages={totalPages}
+              onPageChange={setPageNumber}
+              onPageSizeChange={(size) => { setPageSize(size); setPageNumber(1) }}
+            />
           </section>
         </div>
       )}

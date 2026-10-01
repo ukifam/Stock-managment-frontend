@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type React from 'react'
 import { api, type AvailableItem, type EntryStatus, type SaleRow, type SaleUpdatePayload } from '../api'
 import { Topbar } from '../components/Topbar'
+import { PaginationControls } from '../components/PaginationControls'
 import { ImportHelp } from '../components/ImportHelp'
 import { CameraScanner } from '../components/CameraScanner'
 import { useMemo } from 'react'
@@ -63,6 +64,11 @@ export function Sales({
 }: SalesProps) {
   const [isSelling, setIsSelling] = useState(startSelling)
   const [rows, setRows] = useState<SaleRow[]>([])
+  const [pageNumber, setPageNumber] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
+  const [totalCount, setTotalCount] = useState(0)
+  const [totalPages, setTotalPages] = useState(0)
+  const [listRevision, setListRevision] = useState(0)
   const [filterFrom, setFilterFrom] = useState('')
   const [filterTo, setFilterTo] = useState('')
   const [appliedFilterFrom, setAppliedFilterFrom] = useState('')
@@ -81,11 +87,18 @@ export function Sales({
   const isManual = entryMode === 'manual'
 
   useEffect(() => {
-    api.sales(undefined, appliedFilterFrom, appliedFilterTo).then((response) => {
+    let isMounted = true
+    api.sales(undefined, appliedFilterFrom, appliedFilterTo, pageNumber, pageSize).then((response) => {
+      if (!isMounted) return
       setRows(response.rows)
-      setSelectedId((current) => current || response.rows[0]?.id || '')
-    }).catch(() => setRows([]))
-  }, [appliedFilterFrom, appliedFilterTo])
+      setTotalCount(response.count)
+      setTotalPages(response.totalPages ?? 0)
+      setSelectedId((current) => response.rows.some((row) => row.id === current) ? current : response.rows[0]?.id || '')
+      const lastPage = Math.max(1, response.totalPages ?? 1)
+      if (pageNumber > lastPage) setPageNumber(lastPage)
+    }).catch(() => { if (isMounted) setRows([]) })
+    return () => { isMounted = false }
+  }, [appliedFilterFrom, appliedFilterTo, pageNumber, pageSize, listRevision])
 
   const selectedSale = rows.find((row) => row.id === selectedId) ?? rows[0]
 
@@ -200,7 +213,7 @@ export function Sales({
       const result = await api.bulkImportSales(payloads)
       const skippedNote = result.skipped ? ` (${result.skipped} skipped)` : ''
       const failedNote = result.failed ? ` (${result.failed} failed)` : ''
-      await api.sales(undefined, appliedFilterFrom, appliedFilterTo).then((response) => setRows(response.rows)).catch(() => undefined)
+      setListRevision((current) => current + 1)
       setImportError(`Imported ${result.count} sales successfully${skippedNote}${failedNote}.`)
     } catch (error) {
       setImportError(error instanceof Error ? error.message : 'Failed to import file.')
@@ -216,7 +229,7 @@ export function Sales({
       const updated = await api.updateSaleStatus(id, status)
       setRows((current) => current.map((row) => row.id === id ? updated : row))
     } catch {
-      api.sales(undefined, appliedFilterFrom, appliedFilterTo).then((response) => setRows(response.rows)).catch(() => undefined)
+      api.sales(undefined, appliedFilterFrom, appliedFilterTo, pageNumber, pageSize).then((response) => setRows(response.rows)).catch(() => undefined)
       window.alert('Could not update status. Please try again.')
     }
   }
@@ -243,6 +256,7 @@ export function Sales({
       setRows((current) => current.filter((r) => r.id !== id))
       setSelectedId('')
       setIsEditingSale(false)
+      setListRevision((current) => current + 1)
       setImportError('Sale deleted successfully.')
     } catch (error) {
       window.alert(error instanceof Error ? error.message : 'Could not delete sale.')
@@ -339,7 +353,7 @@ export function Sales({
             >
               <span className="subtab-icon">🏷️</span>
               <span className="subtab-label">All Sales</span>
-              <span className="subtab-badge">{rows.length}</span>
+              <span className="subtab-badge">{totalCount}</span>
             </button>
             <button
               type="button"
@@ -373,8 +387,8 @@ export function Sales({
                 <div className="toolbar">
                   <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>From<input type="date" value={filterFrom} onChange={(event) => setFilterFrom(event.target.value)} /></label>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>To<input type="date" value={filterTo} onChange={(event) => setFilterTo(event.target.value)} /></label>
-                  <button type="button" onClick={() => { setAppliedFilterFrom(filterFrom); setAppliedFilterTo(filterTo) }}>Apply</button>
-                  <button type="button" onClick={() => { setFilterFrom(''); setFilterTo(''); setAppliedFilterFrom(''); setAppliedFilterTo('') }}>Clear</button>
+                  <button type="button" onClick={() => { setPageNumber(1); setAppliedFilterFrom(filterFrom); setAppliedFilterTo(filterTo) }}>Apply</button>
+                  <button type="button" onClick={() => { setPageNumber(1); setFilterFrom(''); setFilterTo(''); setAppliedFilterFrom(''); setAppliedFilterTo('') }}>Clear</button>
                   <button type="button" onClick={handleExport}>Export CSV</button>
                   {onOpenReport && (
                     <button type="button" onClick={onOpenReport}>Sales Report</button>
@@ -402,15 +416,23 @@ export function Sales({
                   </tbody>
                 </table>
               </div>
+              <PaginationControls
+                page={pageNumber}
+                pageSize={pageSize}
+                totalCount={totalCount}
+                totalPages={totalPages}
+                onPageChange={setPageNumber}
+                onPageSizeChange={(size) => { setPageSize(size); setPageNumber(1) }}
+              />
               {importError && (
                 <div style={{ marginTop: '12px', color: importError.startsWith('Imported') ? '#1b5e20' : '#d32f2f' }}>
                   {importError}
                 </div>
               )}
               <div className="inventory-stats">
-                <div><span>Orders</span><strong>{rows.length}</strong></div>
-                <div><span>Filtered Total</span><strong>{formatMoney(filteredSalesTotal, currency)}</strong></div>
-                <div><span>Items Sold</span><strong>{filteredItemsSold}</strong></div>
+                <div><span>Orders</span><strong>{totalCount}</strong></div>
+                <div><span>Page Total</span><strong>{formatMoney(filteredSalesTotal, currency)}</strong></div>
+                <div><span>Page Items</span><strong>{filteredItemsSold}</strong></div>
                 <div><span>Given</span><strong>{rows.filter((row) => row.status === 'Given').length}</strong></div>
                 <div><span>Returned</span><strong>{rows.filter((row) => row.status === 'Returned').length}</strong></div>
               </div>

@@ -3,6 +3,7 @@ export type Page =
   | 'login'
   | 'register'
   | 'dashboard'
+  | 'shop-users'
   | 'inventory'
   | 'stock-movements'
   | 'stock-adjustments'
@@ -19,8 +20,14 @@ export type Page =
   | 'loans-given'
   | 'loans-taken'
   | 'loans-repayments'
+  | 'transfers'
+  | 'system-admin'
+  | 'system-admin-shops'
+  | 'system-admin-users'
+  | 'system-admin-activity'
   | 'reports'
   | 'settings'
+export const GLOBAL_SEARCH_NAVIGATION_EVENT = 'tri:global-search-navigation'
 export type Theme = 'dark' | 'light'
 export type EntryType = 'purchase' | 'sale'
 export type EntryMode = 'scan' | 'manual'
@@ -45,6 +52,8 @@ export type PageRenderProps = ThemePageProps & {
   listRefreshId: number
   reportScope: ReportScope
   setReportScope: (scope: ReportScope) => void
+  activeShopName: string
+  onOpenShop: (ownerKey: string, shopName: string) => void
 }
 
 export type PageDefinition = {

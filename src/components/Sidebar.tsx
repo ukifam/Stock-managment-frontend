@@ -85,6 +85,16 @@ const NAV_GROUPS: NavGroupConfig[] = [
       { id: 'loans-repayments', label: 'Repayments', icon: '💳' },
     ],
   },
+  {
+    id: 'transfers-group',
+    label: 'Transfers',
+    iconClass: 'cart',
+    defaultPage: 'transfers',
+    pages: ['transfers'],
+    items: [
+      { id: 'transfers', label: 'Partner Transfers', icon: '🔁' },
+    ],
+  },
 ]
 
 export function Sidebar({ page, setPage, onNewEntry }: SidebarProps) {
@@ -120,6 +130,9 @@ export function Sidebar({ page, setPage, onNewEntry }: SidebarProps) {
   const dashPage = pageRegistry.find((p) => p.id === 'dashboard')
   const reportsPage = pageRegistry.find((p) => p.id === 'reports')
   const settingsPage = pageRegistry.find((p) => p.id === 'settings')
+  const isShopAdmin = String(user?.role || '').trim().toLowerCase() === 'admin'
+  const isStaff = String(user?.role || '').trim().toLowerCase() === 'staff'
+  const visibleGroups = NAV_GROUPS.filter((group) => !isStaff || ['inventory-group', 'sales-group', 'expenses-group', 'transfers-group'].includes(group.id))
 
   return (
     <aside className="sidebar">
@@ -145,8 +158,26 @@ export function Sidebar({ page, setPage, onNewEntry }: SidebarProps) {
           </button>
         )}
 
+        {isSystemAdminRole(user?.role) && (
+          <button
+            type="button"
+            className={page === 'system-admin' ? 'active' : ''}
+            onClick={() => setPage('system-admin')}
+          >
+            <span className="nav-icon gear" aria-hidden="true" />
+            System Admin
+          </button>
+        )}
+
+        {isShopAdmin && (
+          <button type="button" className={page === 'shop-users' ? 'active' : ''} onClick={() => setPage('shop-users')}>
+            <span className="nav-icon user" aria-hidden="true" />
+            User Management
+          </button>
+        )}
+
         {/* 4 Accordion Groups: Inventory, Purchases, Sales, Expenses */}
-        {NAV_GROUPS.map((group) => {
+        {visibleGroups.map((group) => {
           const isOpen = Boolean(openGroups[group.id])
           const isActive = group.pages.includes(page)
 
@@ -183,7 +214,7 @@ export function Sidebar({ page, setPage, onNewEntry }: SidebarProps) {
         })}
 
         {/* Top-level Reports */}
-        {reportsPage && (
+        {!isStaff && reportsPage && (
           <button
             key="reports"
             className={page === 'reports' ? 'active' : ''}
@@ -196,7 +227,7 @@ export function Sidebar({ page, setPage, onNewEntry }: SidebarProps) {
         )}
 
         {/* Top-level Settings */}
-        {settingsPage && (
+        {!isStaff && settingsPage && (
           <button
             key="settings"
             className={page === 'settings' ? 'active' : ''}
@@ -238,10 +269,14 @@ export function Sidebar({ page, setPage, onNewEntry }: SidebarProps) {
         >
           <span>🏠</span> Home / Landing
         </button>
-        <button className="new-entry" type="button" onClick={onNewEntry}>
+        {!isStaff && <button className="new-entry" type="button" onClick={onNewEntry}>
           <span aria-hidden="true">+</span> New Entry
-        </button>
+        </button>}
       </div>
     </aside>
   )
+}
+
+function isSystemAdminRole(role?: string) {
+  return String(role || '').trim().toLowerCase().replace(/[\s-]+/g, '_') === 'system_admin'
 }

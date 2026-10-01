@@ -1,8 +1,8 @@
 import { useEffect, useState, useMemo } from 'react'
-import { api, type StockAdjustmentPayload, type InventoryRow } from '../api'
+import { api, type InventoryRow, type OpenShowcase, type ShowcaseClosePayload, type StockAdjustmentPayload } from '../api'
 import type { PageDefinition, PageRenderProps } from '../types'
 
-type AdjustmentMode = 'count' | 'quick'
+type AdjustmentMode = 'count' | 'quick' | 'showcase'
 
 export function StockAdjustments({ setPage }: PageRenderProps) {
   const [inventoryItems, setInventoryItems] = useState<InventoryRow[]>([])
@@ -23,6 +23,16 @@ export function StockAdjustments({ setPage }: PageRenderProps) {
   const [quickQty, setQuickQty] = useState('')
   const [quickReason, setQuickReason] = useState('')
   const [quickRef, setQuickRef] = useState('')
+  const [showcases, setShowcases] = useState<OpenShowcase[]>([])
+  const [showcaseFlow, setShowcaseFlow] = useState<'send' | 'close'>('send')
+  const [showcaseReference, setShowcaseReference] = useState('')
+  const [showcasePartner, setShowcasePartner] = useState('')
+  const [showcaseQuantity, setShowcaseQuantity] = useState('1')
+  const [expectedReturnDate, setExpectedReturnDate] = useState('')
+  const [showcaseOutcome, setShowcaseOutcome] = useState<'RETURNED' | 'SOLD'>('RETURNED')
+  const [agreedUnitPrice, setAgreedUnitPrice] = useState('')
+  const [showcasePayment, setShowcasePayment] = useState('Cash')
+  const [showcaseNotes, setShowcaseNotes] = useState('')
 
   useEffect(() => {
     // Fetch all inventory items so any product (even 0-stock) can be counted/adjusted
@@ -41,9 +51,24 @@ export function StockAdjustments({ setPage }: PageRenderProps) {
       })
   }, [])
 
+  useEffect(() => {
+    let isMounted = true
+    api.openShowcases()
+      .then((rows) => {
+        if (!isMounted) return
+        setShowcases(rows)
+        setShowcaseReference((current) => rows.some((row) => row.reference === current) ? current : rows[0]?.reference || '')
+      })
+      .catch(() => {
+        if (isMounted) setShowcases([])
+      })
+    return () => { isMounted = false }
+  }, [])
+
   const selectedItem = useMemo(() => {
     return inventoryItems.find((i) => i.sku === selectedSku)
   }, [inventoryItems, selectedSku])
+  const selectedShowcase = showcases.find((row) => row.reference === showcaseReference) ?? showcases[0]
 
   const filteredItems = useMemo(() => {
     if (!searchQuery.trim()) return inventoryItems
@@ -162,6 +187,103 @@ export function StockAdjustments({ setPage }: PageRenderProps) {
     }
   }
 
+  const refreshShowcaseData = async () => {
+    const [inventoryResponse, openCases] = await Promise.all([api.inventory(2000), api.openShowcases()])
+    setInventoryItems(inventoryResponse.rows)
+    setShowcases(openCases)
+    setShowcaseReference((current) => openCases.some((showcase) => showcase.reference === current) ? current : openCases[0]?.reference || '')
+    if (selectedItem) {
+      const updatedItem = inventoryResponse.rows.find((row) => row.sku === selectedItem.sku)
+      if (updatedItem) setSelectedSku(updatedItem.sku)
+    }
+  }
+
+  const handleShowcaseIssue = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedItem || !showcasePartner.trim()) {
+      setMessage({ text: 'Select an item and enter the partner shop name.', type: 'error' })
+      return
+    }
+    const quantity = Number(showcaseQuantity)
+    if (!Number.isInteger(quantity) || quantity <= 0 || quantity > currentStock) {
+      setMessage({ text: `Enter a whole number from 1 to ${currentStock}.`, type: 'error' })
+      return
+    }
+
+    setSaving(true)
+    setMessage(null)
+    try {
+      const movement = await api.sendToShowcase({
+        sku: selectedItem.sku,
+        quantity,
+        partner: showcasePartner.trim(),
+        expectedReturnDate: expectedReturnDate || undefined,
+        notes: showcaseNotes.trim() || undefined,
+      })
+      await refreshShowcaseData()
+      setShowcasePartner('')
+      setShowcaseQuantity('1')
+      setExpectedReturnDate('')
+      setShowcaseNotes('')
+      setShowcaseFlow('close')
+      setMessage({ text: `Issued ${quantity} ${selectedItem.item} to ${showcasePartner.trim()} under reference ${movement.reference}.`, type: 'success' })
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? error.message : 'Could not issue items to the showcase.', type: 'error' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleShowcaseClose = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const showcase = showcases.find((row) => row.reference === showcaseReference)
+    if (!showcase) {
+      setMessage({ text: 'Select an open showcase issue to close.', type: 'error' })
+      return
+    }
+    const quantity = Number(showcaseQuantity)
+    if (!Number.isInteger(quantity) || quantity <= 0 || quantity > showcase.remainingQuantity) {
+      setMessage({ text: `Enter a whole number from 1 to ${showcase.remainingQuantity}.`, type: 'error' })
+      return
+    }
+    const unitPrice = Number(agreedUnitPrice)
+    if (showcaseOutcome === 'SOLD' && (!Number.isFinite(unitPrice) || unitPrice <= 0)) {
+      setMessage({ text: 'Enter the agreed selling price per unit.', type: 'error' })
+      return
+    }
+
+    const payload: ShowcaseClosePayload = {
+      outcome: showcaseOutcome,
+      quantity,
+      ...(showcaseOutcome === 'SOLD' ? {
+        unitPrice,
+        payment: showcasePayment,
+        paidAmount: showcasePayment === 'Cash' ? unitPrice * quantity : 0,
+      } : {}),
+      notes: showcaseNotes.trim() || undefined,
+    }
+
+    setSaving(true)
+    setMessage(null)
+    try {
+      await api.closeShowcase(showcase.reference, payload)
+      await refreshShowcaseData()
+      setShowcaseQuantity('1')
+      setAgreedUnitPrice('')
+      setShowcaseNotes('')
+      setMessage({
+        text: showcaseOutcome === 'RETURNED'
+          ? `Returned ${quantity} ${showcase.item} from ${showcase.partner} to available stock.`
+          : `Recorded sale of ${quantity} ${showcase.item} to ${showcase.partner} at ${unitPrice} per unit. Available stock was not deducted again.`,
+        type: 'success',
+      })
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? error.message : 'Could not close the showcase issue.', type: 'error' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <div className="page stock-adjustments" style={{ padding: '2rem', maxWidth: '1000px', margin: '0 auto' }}>
       {/* Header */}
@@ -221,6 +343,7 @@ export function StockAdjustments({ setPage }: PageRenderProps) {
         style={{
           display: 'flex',
           gap: '0.5rem',
+          flexWrap: 'wrap',
           marginBottom: '1.5rem',
           background: 'var(--panel, #141d2e)',
           padding: '0.4rem',
@@ -244,7 +367,7 @@ export function StockAdjustments({ setPage }: PageRenderProps) {
             transition: 'all 0.2s',
           }}
         >
-          🔍 Physical Stock Count (Reconciliation)
+          🔍 Physical Stock Count
         </button>
         <button
           type="button"
@@ -261,7 +384,24 @@ export function StockAdjustments({ setPage }: PageRenderProps) {
             transition: 'all 0.2s',
           }}
         >
-          ⚡ Quick Adjustment (Damage / Loss / Return)
+          ⚡ Record incident that happened
+        </button>
+        <button
+          type="button"
+          onClick={() => { setMode('showcase'); setShowcaseFlow(showcases.length ? 'close' : 'send'); setMessage(null) }}
+          style={{
+            padding: '0.6rem 1.25rem',
+            borderRadius: 'var(--radius-sm, 8px)',
+            border: 'none',
+            background: mode === 'showcase' ? 'var(--cyan, #3b82f6)' : 'transparent',
+            color: mode === 'showcase' ? '#ffffff' : 'var(--text-soft, #94a3b8)',
+            fontWeight: 600,
+            fontSize: '0.9rem',
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+          }}
+        >
+          Transfer to Partner
         </button>
       </div>
 
@@ -291,6 +431,7 @@ export function StockAdjustments({ setPage }: PageRenderProps) {
           ⏳ Loading inventory catalog...
         </div>
       ) : (
+        <>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem' }}>
           {/* Left Column: Product Selection & Live Info Card */}
           <div
@@ -415,7 +556,95 @@ export function StockAdjustments({ setPage }: PageRenderProps) {
               padding: '1.5rem',
             }}
           >
-            {mode === 'count' ? (
+            {mode === 'showcase' ? (
+              <form onSubmit={showcaseFlow === 'send' ? handleShowcaseIssue : handleShowcaseClose} style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
+                <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-strong, #f1f5f9)' }}>
+                  Showcase / Consignment
+                </h3>
+                <p style={{ margin: '-0.6rem 0 0', color: 'var(--text-soft, #94a3b8)', fontSize: '0.85rem', lineHeight: 1.5 }}>
+                  Issuing items reduces available stock. Return unsold items or record a partner sale without deducting stock twice.
+                </p>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <button type="button" onClick={() => { setShowcaseFlow('send'); setMessage(null) }} className={showcaseFlow === 'send' ? 'primary-action' : ''}>
+                    Send to partner
+                  </button>
+                  <button type="button" onClick={() => { setShowcaseFlow('close'); setMessage(null) }} className={showcaseFlow === 'close' ? 'primary-action' : ''}>
+                    Return or record sale ({showcases.length})
+                  </button>
+                </div>
+
+                {showcaseFlow === 'send' ? (
+                  <>
+                    <label className="showcase-field">Partner shop name
+                      <input required value={showcasePartner} onChange={(event) => setShowcasePartner(event.target.value)} placeholder="Shop or colleague name" />
+                    </label>
+                    <label className="showcase-field">Quantity to send
+                      <input required type="number" min="1" max={currentStock} step="1" value={showcaseQuantity} onChange={(event) => setShowcaseQuantity(event.target.value)} />
+                    </label>
+                    <label className="showcase-field">Expected return date (optional)
+                      <input type="date" value={expectedReturnDate} onChange={(event) => setExpectedReturnDate(event.target.value)} />
+                    </label>
+                    <label className="showcase-field">Notes (optional)
+                      <input value={showcaseNotes} onChange={(event) => setShowcaseNotes(event.target.value)} placeholder="Client demo, event, or other context" />
+                    </label>
+                    <button className="primary-action" type="submit" disabled={saving || !selectedItem || currentStock < 1}>
+                      {saving ? 'Recording issue…' : 'Issue stock to partner'}
+                    </button>
+                  </>
+                ) : showcases.length === 0 ? (
+                  <div style={{ padding: '1rem', borderRadius: '8px', background: 'var(--bg, #0b1220)', color: 'var(--text-soft, #94a3b8)' }}>
+                    No open showcase items. Send an item to a partner first.
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ color: 'var(--text-soft, #94a3b8)', fontSize: '0.85rem' }}>
+                      Select an open issue from the table below to load it here.
+                    </div>
+                    {selectedShowcase && (
+                      <div style={{ padding: '0.85rem', borderRadius: '8px', background: 'var(--bg, #0b1220)', color: 'var(--text-soft, #94a3b8)', fontSize: '0.85rem', lineHeight: 1.6 }}>
+                        <strong style={{ color: 'var(--text-strong, #f1f5f9)' }}>{selectedShowcase.item}</strong> ({selectedShowcase.sku})<br />
+                        Partner: {selectedShowcase.partner} · Issued {selectedShowcase.quantityIssued} · Returned {selectedShowcase.quantityReturned} · Sold {selectedShowcase.quantitySold}<br />
+                        {selectedShowcase.expectedReturnDate && <>Expected back: {selectedShowcase.expectedReturnDate}</>}
+                      </div>
+                    )}
+                    <label className="showcase-field">Quantity to close
+                      <input required type="number" min="1" max={selectedShowcase?.remainingQuantity || 1} step="1" value={showcaseQuantity} onChange={(event) => setShowcaseQuantity(event.target.value)} />
+                    </label>
+                    <div className="showcase-field">
+                      <span>Outcome</span>
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <button type="button" onClick={() => setShowcaseOutcome('RETURNED')} className={showcaseOutcome === 'RETURNED' ? 'primary-action' : ''}>Returned unsold</button>
+                        <button type="button" onClick={() => setShowcaseOutcome('SOLD')} className={showcaseOutcome === 'SOLD' ? 'primary-action' : ''}>Sold to partner</button>
+                      </div>
+                    </div>
+                    {showcaseOutcome === 'SOLD' && (
+                      <>
+                        <label className="showcase-field">Agreed selling price per unit
+                          <input required type="number" min="0.01" step="0.01" value={agreedUnitPrice} onChange={(event) => setAgreedUnitPrice(event.target.value)} placeholder="Enter agreed price" />
+                        </label>
+                        <label className="showcase-field">Payment
+                          <select value={showcasePayment} onChange={(event) => setShowcasePayment(event.target.value)}>
+                            <option value="Cash">Cash paid</option>
+                            <option value="Credit">Credit / payment due</option>
+                          </select>
+                        </label>
+                        {agreedUnitPrice && Number(agreedUnitPrice) > 0 && (
+                          <div style={{ color: 'var(--text-soft, #94a3b8)', fontSize: '0.85rem' }}>
+                            Sale total: {(Number(agreedUnitPrice) * Number(showcaseQuantity || 0)).toLocaleString()} · customer recorded as {selectedShowcase?.partner}
+                          </div>
+                        )}
+                      </>
+                    )}
+                    <label className="showcase-field">Notes (optional)
+                      <input value={showcaseNotes} onChange={(event) => setShowcaseNotes(event.target.value)} placeholder="Closeout notes" />
+                    </label>
+                    <button className="primary-action" type="submit" disabled={saving || !selectedShowcase}>
+                      {saving ? 'Saving closeout…' : showcaseOutcome === 'RETURNED' ? 'Return items to stock' : 'Record partner sale'}
+                    </button>
+                  </>
+                )}
+              </form>
+            ) : mode === 'count' ? (
               /* Physical Stock Count Mode Form */
               <form onSubmit={handleCountSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
                 <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-strong, #f1f5f9)' }}>
@@ -688,6 +917,60 @@ export function StockAdjustments({ setPage }: PageRenderProps) {
             )}
           </div>
         </div>
+        {mode === 'showcase' && showcaseFlow === 'close' && showcases.length > 0 && (
+          <section className="showcase-register">
+            <div className="showcase-register-heading">
+              <div>
+                <h2>Items Sent to Partners</h2>
+                <p>Open showcase issues with quantities still out of stock.</p>
+              </div>
+              <span>{showcases.length} open {showcases.length === 1 ? 'issue' : 'issues'}</span>
+            </div>
+            <div className="showcase-register-table-wrap">
+              <table className="showcase-register-table">
+                <thead>
+                  <tr>
+                    <th>Reference</th>
+                    <th>Issue Date</th>
+                    <th>Item / SKU</th>
+                    <th>Partner Shop</th>
+                    <th>Issued</th>
+                    <th>Returned</th>
+                    <th>Sold</th>
+                    <th>Remaining</th>
+                    <th>Expected Back</th>
+                    <th aria-label="Select issue" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {showcases.map((showcase) => (
+                    <tr key={showcase.reference} className={selectedShowcase?.reference === showcase.reference ? 'selected' : ''}>
+                      <td><strong>{showcase.reference}</strong></td>
+                      <td>{showcase.issueDate}</td>
+                      <td><strong>{showcase.item}</strong><small>{showcase.sku}</small></td>
+                      <td>{showcase.partner}</td>
+                      <td>{showcase.quantityIssued}</td>
+                      <td>{showcase.quantityReturned}</td>
+                      <td>{showcase.quantitySold}</td>
+                      <td><strong>{showcase.remainingQuantity}</strong></td>
+                      <td>{showcase.expectedReturnDate || 'Not set'}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className={selectedShowcase?.reference === showcase.reference ? 'selected' : ''}
+                          onClick={() => { setShowcaseReference(showcase.reference); setShowcaseQuantity('1') }}
+                        >
+                          {selectedShowcase?.reference === showcase.reference ? 'Selected' : 'Select'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+        </>
       )}
     </div>
   )

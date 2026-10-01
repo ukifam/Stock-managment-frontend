@@ -28,8 +28,8 @@ export function Login({ theme, toggleTheme, setPage }: LoginProps) {
 
     setLoading(true)
     try {
-      await login(email.trim(), password)
-      setPage('dashboard')
+      const user = await login(email.trim(), password)
+      setPage(isSystemAdminRole(user.role) ? 'system-admin' : 'dashboard')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid credentials. Please try again.')
     } finally {
@@ -133,4 +133,8 @@ export function Login({ theme, toggleTheme, setPage }: LoginProps) {
       </div>
     </div>
   )
+}
+
+function isSystemAdminRole(role: string) {
+  return String(role).trim().toLowerCase().replace(/[\s-]+/g, '_') === 'system_admin'
 }

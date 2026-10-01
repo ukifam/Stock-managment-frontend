@@ -6,6 +6,7 @@ export type AuthUser = {
   username: string
   email: string
   role: string
+  ownerKey?: string
 }
 
 type AuthContextType = {
@@ -13,7 +14,7 @@ type AuthContextType = {
   token: string | null
   isAuthenticated: boolean
   loading: boolean
-  login: (email: string, password: string) => Promise<void>
+  login: (email: string, password: string) => Promise<AuthUser>
   register: (username: string, email: string, password: string) => Promise<void>
   logout: () => void
 }
@@ -22,6 +23,8 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 const TOKEN_STORAGE_KEY = 'tri_ltd_auth_token'
 const USER_STORAGE_KEY = 'tri_ltd_auth_user'
+const ACTIVE_SHOP_STORAGE_KEY = 'tri_system_admin_shop_owner_key'
+const ACTIVE_SHOP_NAME_STORAGE_KEY = 'tri_system_admin_shop_name'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_STORAGE_KEY))
@@ -70,6 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(res.user)
     localStorage.setItem(TOKEN_STORAGE_KEY, res.token)
     localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(res.user))
+    return res.user
   }
 
   const register = async (username: string, email: string, password: string) => {
@@ -85,6 +89,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
     localStorage.removeItem(TOKEN_STORAGE_KEY)
     localStorage.removeItem(USER_STORAGE_KEY)
+    localStorage.removeItem(ACTIVE_SHOP_STORAGE_KEY)
+    localStorage.removeItem(ACTIVE_SHOP_NAME_STORAGE_KEY)
   }
 
   return (

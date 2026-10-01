@@ -1,4 +1,4 @@
-import type { FilterPeriod } from './types'
+import type { FilterPeriod, Page } from './types'
 
 export type CreditFilter = 'all' | 'salesCredit' | 'purchasesCredit'
 
@@ -105,6 +105,7 @@ export type PurchaseRow = {
 export type SaleRow = {
   date: string
   id: string
+  reference?: string
   customer: string
   phone: string
   item: string
@@ -129,8 +130,10 @@ export type SaleRow = {
 }
 
 export type DashboardResponse = {
+  categories: string[]
   metrics: Metric[]
   salesBars: number[]
+  salesLabels: string[]
   lowStock: LowStockAlert[]
   catalog: CatalogItem[]
 }
@@ -147,7 +150,40 @@ export type StockMovementRow = {
   newStock: number
   reason?: string
   reference?: string
+  partner?: string
+  showcaseQuantity?: number
+  expectedReturnDate?: string
   user?: string
+}
+
+export type OpenShowcase = {
+  reference: string
+  sku: string
+  item: string
+  partner: string
+  issueDate: string
+  expectedReturnDate?: string
+  quantityIssued: number
+  quantityReturned: number
+  quantitySold: number
+  remainingQuantity: number
+}
+
+export type ShowcaseIssuePayload = {
+  sku: string
+  quantity: number
+  partner: string
+  expectedReturnDate?: string
+  notes?: string
+}
+
+export type ShowcaseClosePayload = {
+  outcome: 'RETURNED' | 'SOLD'
+  quantity: number
+  unitPrice?: number
+  payment?: string
+  paidAmount?: number
+  notes?: string
 }
 
 export type StockDiscrepancyRow = StockMovementRow & {
@@ -174,6 +210,24 @@ export type StockAdjustmentPayload = {
 
 export type ListResponse<T> = {
   rows: T[]
+  count: number
+  page?: number
+  pageSize?: number
+  totalPages?: number
+  hasNextPage?: boolean
+  hasPrevPage?: boolean
+}
+
+export type GlobalSearchResult = {
+  id: string
+  type: string
+  title: string
+  subtitle: string
+  page: Page
+}
+
+export type GlobalSearchResponse = {
+  results: GlobalSearchResult[]
   count: number
 }
 
@@ -236,8 +290,10 @@ export type ReportsResponse = {
     netCashFlow: string
     purchasesCash?: string
     purchasesOnCredit?: string
+    totalPurchasesOnCredit?: string
     salesCash?: string
     salesOnCredit?: string
+    totalSalesOnCredit?: string
     totalPayments?: string
     totalStockUnits?: number
     totalInventoryValuation?: string
@@ -441,6 +497,127 @@ export type LoanMetrics = {
   totalLoans: number
 }
 
+export type PartnerTransfer = {
+  _id: string
+  reference: string
+  partner: string
+  partnerPhone?: string
+  sku?: string
+  item: string
+  category: string
+  quantityReceived: number
+  quantitySold: number
+  quantityReturned: number
+  remainingQuantity: number
+  partnerUnitCost: number
+  customerUnitPrice: number
+  totalPartnerCost: number
+  totalPotentialRevenue: number
+  realizedRevenue: number
+  receivedDate: string
+  status: 'OPEN' | 'CLOSED'
+  notes?: string
+}
+
+export type PartnerTransferPayload = {
+  partner: string
+  partnerPhone?: string
+  sku?: string
+  item: string
+  category?: string
+  quantityReceived: number
+  partnerUnitCost: number
+  customerUnitPrice: number
+  receivedDate?: string
+  notes?: string
+}
+
+export type PartnerTransferListResponse = {
+  rows: PartnerTransfer[]
+  count: number
+  openCount: number
+}
+
+export type AdminActivity = {
+  id: string
+  type: string
+  reference: string
+  description: string
+  date: string
+  status: string
+  actor: string
+  amount?: string
+  section: Page
+  shopOwnerKey?: string
+  shopName?: string
+}
+
+export type AdminOverview = {
+  generatedAt: string
+  metrics: {
+    shops: number
+    users: number
+    activeUsers: number
+    inventoryItems: number
+    lowStockCount: number
+    outOfStockCount: number
+    salesToday: number
+    purchasesToday: number
+    expensesToday: number
+    openLoans: number
+    openTransfers: number
+  }
+  shops: Array<{
+    ownerKey: string
+    name: string
+    email: string
+    userCount: number
+    active: boolean
+  }>
+  activity: AdminActivity[]
+}
+
+export type AdminUser = {
+  id: string
+  username: string
+  email: string
+  role: string
+  active: boolean
+  ownerKey: string
+  shopName: string
+  shopEmail: string
+  createdAt?: string
+}
+
+export type CreateAdminUserPayload = {
+  username: string
+  email: string
+  password: string
+  role: 'admin' | 'staff'
+  ownerKey?: string
+}
+
+export type ShopRole =
+  | 'cashier'
+  | 'sales_associate'
+  | 'customer_service_representative'
+  | 'stock_clerk'
+  | 'visual_merchandiser'
+  | 'loss_prevention_officer'
+  | 'shift_supervisor'
+  | 'assistant_store_manager'
+  | 'store_manager'
+
+export type ShopUser = {
+  id: string
+  username: string
+  email: string
+  shopRole: ShopRole
+  accountType: 'admin' | 'staff'
+  active: boolean
+  createdAt?: string
+}
+
 export type CreateLoanPayload = {
   id?: string
   type: LoanType
@@ -492,9 +669,20 @@ async function request<T>(path: string, options?: RequestInit & { timeoutMs?: nu
   const controller = timeoutMs ? new AbortController() : undefined
   const timeoutId = timeoutMs ? window.setTimeout(() => controller?.abort(), timeoutMs) : undefined
   const token = localStorage.getItem(TOKEN_STORAGE_KEY)
+  const activeShopOwnerKey = localStorage.getItem('tri_system_admin_shop_owner_key')
+  let isSystemAdmin = false
+  try {
+    isSystemAdmin = String(JSON.parse(localStorage.getItem('tri_ltd_auth_user') || 'null')?.role || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, '_') === 'system_admin'
+  } catch {
+    isSystemAdmin = false
+  }
   const headers = {
     ...(fetchOptions.body ? { 'Content-Type': 'application/json' } : {}),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(isSystemAdmin && activeShopOwnerKey ? { 'X-Shop-Owner-Key': activeShopOwnerKey } : {}),
     ...fetchOptions.headers,
   }
 
@@ -521,11 +709,13 @@ async function request<T>(path: string, options?: RequestInit & { timeoutMs?: nu
   }
 }
 
-function periodQuery(period?: FilterPeriod, from?: string, to?: string) {
+function periodQuery(period?: FilterPeriod, from?: string, to?: string, page = 1, limit = 50) {
   const params = new URLSearchParams()
   if (period) params.set('period', period)
   if (from) params.set('from', from)
   if (to) params.set('to', to)
+  params.set('page', String(page))
+  params.set('limit', String(limit))
   const query = params.toString()
   return query ? `?${query}` : ''
 }
@@ -540,11 +730,19 @@ function reportQuery(from?: string, to?: string, credit: CreditFilter = 'all') {
 }
 
 export const api = {
-  dashboard: () => request<DashboardResponse>('/dashboard'),
-  inventory: (limit = 1000) => request<ListResponse<InventoryRow>>(`/inventory?limit=${encodeURIComponent(String(limit))}`),
+  dashboard: (filters: { from?: string; to?: string; category?: string; stockStatus?: string } = {}) => {
+    const params = new URLSearchParams()
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) params.set(key, value)
+    })
+    const query = params.toString()
+    return request<DashboardResponse>(`/dashboard${query ? `?${query}` : ''}`)
+  },
+  inventory: (limit = 1000, page = 1) => request<ListResponse<InventoryRow>>(`/inventory?page=${encodeURIComponent(String(page))}&limit=${encodeURIComponent(String(limit))}`),
   searchInventory: (query: string) => request<ListResponse<InventoryRow>>(`/search/inventory?q=${encodeURIComponent(query)}`),
-  purchases: (period?: FilterPeriod, from?: string, to?: string) => request<ListResponse<PurchaseRow>>(`/purchases${periodQuery(period, from, to)}`),
-  sales: (period?: FilterPeriod, from?: string, to?: string) => request<ListResponse<SaleRow>>(`/sales${periodQuery(period, from, to)}`),
+  searchAll: (query: string) => request<GlobalSearchResponse>(`/search?q=${encodeURIComponent(query)}`),
+  purchases: (period?: FilterPeriod, from?: string, to?: string, page = 1, limit = 50) => request<ListResponse<PurchaseRow>>(`/purchases${periodQuery(period, from, to, page, limit)}`),
+  sales: (period?: FilterPeriod, from?: string, to?: string, page = 1, limit = 50) => request<ListResponse<SaleRow>>(`/sales${periodQuery(period, from, to, page, limit)}`),
   expenses: (page = 1, limit = 50, search = '', category = '') => request<ListResponse<ExpenseRow>>(`/expenses?page=${encodeURIComponent(String(page))}&limit=${encodeURIComponent(String(limit))}&search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}`),
   reports: (from?: string, to?: string, credit: CreditFilter = 'all') => request<ReportsResponse>(`/reports${reportQuery(from, to, credit)}`),
   settings: () => request<SettingsResponse>('/settings'),
@@ -655,6 +853,15 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(payload),
   }),
+  openShowcases: () => request<OpenShowcase[]>('/stock-movements/showcases/open'),
+  sendToShowcase: (payload: ShowcaseIssuePayload) => request<StockMovementRow>('/stock-movements/showcases', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  closeShowcase: (reference: string, payload: ShowcaseClosePayload) => request<unknown>(`/stock-movements/showcases/${encodeURIComponent(reference)}/close`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
   venues: () => request<ListResponse<VenueRow>>('/venues'),
   createVenue: (payload: VenueRow) => request<VenueRow>('/venues', {
     method: 'POST',
@@ -674,6 +881,26 @@ export const api = {
     if (search) params.set('search', search)
     return request<ListResponse<LoanRow>>(`/loans?${params.toString()}`)
   },
+  partnerTransfers: (status = 'ALL', search = '') => request<PartnerTransferListResponse>(`/transfers?status=${encodeURIComponent(status)}&search=${encodeURIComponent(search)}`),
+  adminOverview: () => request<AdminOverview>('/admin/overview'),
+  adminUsers: () => request<AdminUser[]>('/admin/users'),
+  createAdminUser: (payload: CreateAdminUserPayload) => request<AdminUser>('/admin/users', { method: 'POST', body: JSON.stringify(payload) }),
+  updateAdminUser: (id: string, payload: { username?: string; email?: string; password?: string; role?: 'admin' | 'staff'; ownerKey?: string; active?: boolean }) => request<AdminUser>(`/admin/users/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  shopUsers: () => request<ShopUser[]>('/shop/users'),
+  createShopUser: (payload: { username: string; email: string; password: string; shopRole: ShopRole }) => request<ShopUser>('/shop/users', { method: 'POST', body: JSON.stringify(payload) }),
+  updateShopUser: (id: string, payload: { username?: string; email?: string; password?: string; active?: boolean; shopRole?: ShopRole }) => request<ShopUser>(`/shop/users/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  receivePartnerTransfer: (payload: PartnerTransferPayload) => request<PartnerTransfer>('/transfers', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  sellPartnerTransfer: (id: string, payload: { quantity: number; customer: string; unitPrice: number; payment: string; paidAmount?: number; date?: string }) => request<unknown>(`/transfers/${encodeURIComponent(id)}/sell`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  returnPartnerTransfer: (id: string, payload: { quantity: number; date?: string; notes?: string }) => request<PartnerTransfer>(`/transfers/${encodeURIComponent(id)}/return`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
   loan: (id: string) => request<LoanRow>(`/loans/${encodeURIComponent(id)}`),
   createLoan: (payload: CreateLoanPayload) => request<LoanRow>('/loans', {
     method: 'POST',
@@ -703,15 +930,15 @@ export const api = {
   deleteExpense: (id: string) => request<{ success: boolean }>(`/expenses/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   }),
-  login: (email: string, password: string) => request<{ token: string; user: { id: string; username: string; email: string; role: string } }>('/auth/login', {
+  login: (email: string, password: string) => request<{ token: string; user: { id: string; username: string; email: string; role: string; ownerKey?: string } }>('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
   }),
-  register: (username: string, email: string, password: string) => request<{ token: string; user: { id: string; username: string; email: string; role: string } }>('/auth/register', {
+  register: (username: string, email: string, password: string) => request<{ token: string; user: { id: string; username: string; email: string; role: string; ownerKey?: string } }>('/auth/register', {
     method: 'POST',
     body: JSON.stringify({ username, email, password }),
   }),
-  me: (token: string) => request<{ id: string; username: string; email: string; role: string }>('/auth/me', {
+  me: (token: string) => request<{ id: string; username: string; email: string; role: string; ownerKey?: string }>('/auth/me', {
     headers: { Authorization: `Bearer ${token}` },
   }),
 }

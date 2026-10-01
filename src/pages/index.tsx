@@ -8,6 +8,9 @@ import { Reports, page as reportsPage } from './Reports'
 import { Settings, page as settingsPage } from './Settings'
 import { StockMovements, page as stockMovementsPage } from './StockMovements'
 import { StockAdjustments, page as stockAdjustmentsPage } from './StockAdjustments'
+import { Transfers, page as transfersPage } from './Transfers'
+import { SystemAdmin, page as systemAdminPage } from './SystemAdmin'
+import { ShopUsers, page as shopUsersPage } from './ShopUsers'
 import { Landing } from './Landing'
 import { Login } from './Login'
 import { Register } from './Register'
@@ -40,9 +43,13 @@ export const pageRegistry: PageDefinition[] = [
   },
   {
     ...dashboardPage,
-    render: ({ theme, toggleTheme, openEntryModal }) => (
-      <Dashboard theme={theme} toggleTheme={toggleTheme} onNewEntry={() => openEntryModal()} />
+    render: ({ theme, toggleTheme, openEntryModal, activeShopName }) => (
+      <Dashboard theme={theme} toggleTheme={toggleTheme} onNewEntry={() => openEntryModal()} activeShopName={activeShopName} />
     ),
+  },
+  {
+    ...shopUsersPage,
+    render: ({ theme, toggleTheme }) => <ShopUsers theme={theme} toggleTheme={toggleTheme} />,
   },
   {
     ...inventoryPage,
@@ -329,5 +336,31 @@ export const pageRegistry: PageDefinition[] = [
     render: (props) => (
       <StockAdjustments {...props} />
     ),
+  },
+  {
+    ...transfersPage,
+    render: (props) => <Transfers {...props} />,
+  },
+  {
+    ...systemAdminPage,
+    render: (props) => <SystemAdmin {...props} />,
+  },
+  {
+    id: 'system-admin-shops',
+    label: 'Shops',
+    icon: 'box',
+    render: (props) => <SystemAdmin {...props} />,
+  },
+  {
+    id: 'system-admin-users',
+    label: 'User Accounts',
+    icon: 'user',
+    render: (props) => <SystemAdmin {...props} />,
+  },
+  {
+    id: 'system-admin-activity',
+    label: 'Activity Log',
+    icon: 'reports',
+    render: (props) => <SystemAdmin {...props} />,
   },
 ]

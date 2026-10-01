@@ -3,6 +3,7 @@ import type React from 'react'
 import { api, type InventoryRow, type InventoryUpdatePayload } from '../api'
 import { Topbar } from '../components/Topbar'
 import { ImportHelp } from '../components/ImportHelp'
+import { PaginationControls } from '../components/PaginationControls'
 import type { PageRenderProps } from '../types'
 
 export const page = { id: 'inventory' as const, label: 'Inventory', icon: 'box' }
@@ -12,6 +13,11 @@ import { formatMoney } from '../utils/money'
 
 export function Inventory({ theme = 'dark', toggleTheme = () => {}, setPage }: Partial<PageRenderProps>) {
   const [rows, setRows] = useState<InventoryRow[]>([])
+  const [pageNumber, setPageNumber] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
+  const [totalCount, setTotalCount] = useState(0)
+  const [totalPages, setTotalPages] = useState(0)
+  const [listRevision, setListRevision] = useState(0)
   const [selectedSku, setSelectedSku] = useState('')
   const [isEditing, setIsEditing] = useState(false)
   const [inventoryForm, setInventoryForm] = useState<InventoryUpdatePayload>({})
@@ -20,11 +26,20 @@ export function Inventory({ theme = 'dark', toggleTheme = () => {}, setPage }: P
   const importInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    api.inventory().then((response) => {
+    let isMounted = true
+    api.inventory(pageSize, pageNumber).then((response) => {
+      if (!isMounted) return
       setRows(response.rows)
-      setSelectedSku((current) => current || response.rows[0]?.sku || '')
-    }).catch(() => setRows([]))
-  }, [])
+      setTotalCount(response.count)
+      setTotalPages(response.totalPages ?? 0)
+      setSelectedSku((current) => response.rows.some((row) => row.sku === current) ? current : response.rows[0]?.sku || '')
+      const lastPage = Math.max(1, response.totalPages ?? 1)
+      if (pageNumber > lastPage) setPageNumber(lastPage)
+    }).catch(() => {
+      if (isMounted) setRows([])
+    })
+    return () => { isMounted = false }
+  }, [pageNumber, pageSize, listRevision])
 
   const selectedRow = rows.find((row) => row.sku === selectedSku) ?? rows[0]
   const availableRows = rows.filter((row) => getStockUnits(row) > 0)
@@ -60,6 +75,7 @@ export function Inventory({ theme = 'dark', toggleTheme = () => {}, setPage }: P
       setRows((current) => current.filter((row) => row.sku !== selectedRow.sku))
       setSelectedSku('')
       setIsEditing(false)
+      setListRevision((current) => current + 1)
       setImportError('Inventory item deleted successfully.')
     } catch (error) {
       setImportError(error instanceof Error ? error.message : 'Could not delete inventory item')
@@ -128,8 +144,11 @@ export function Inventory({ theme = 'dark', toggleTheme = () => {}, setPage }: P
 
       const result = await api.bulkImportInventory(payloads)
       const skippedNote = result.skipped ? ` (${result.skipped} skipped)` : ''
-      const response = await api.inventory()
+      setPageNumber(1)
+      const response = await api.inventory(pageSize, 1)
       setRows(response.rows)
+      setTotalCount(response.count)
+      setTotalPages(response.totalPages ?? 0)
       if (response.rows[0]?.sku) {
         setSelectedSku(response.rows[0].sku)
       }
@@ -153,7 +172,7 @@ export function Inventory({ theme = 'dark', toggleTheme = () => {}, setPage }: P
           >
             <span className="subtab-icon">📦</span>
             <span className="subtab-label">Products</span>
-            <span className="subtab-badge">{rows.length}</span>
+            <span className="subtab-badge">{totalCount}</span>
           </button>
           <button
             type="button"
@@ -176,7 +195,7 @@ export function Inventory({ theme = 'dark', toggleTheme = () => {}, setPage }: P
       <div className="inventory-layout">
         <section className="inventory-content page-pad">
           <div className="inventory-title">
-            <div><h1>Inventory Management</h1><p>Real-time status of 1,284 high-value assets.</p></div>
+            <div><h1>Inventory Management</h1><p>Real-time status of {totalCount.toLocaleString()} products.</p></div>
             <div className="toolbar">
               <button type="button" onClick={handleExport}>Export</button>
               <button type="button" onClick={() => importInputRef.current?.click()} disabled={isImporting}>
@@ -187,17 +206,25 @@ export function Inventory({ theme = 'dark', toggleTheme = () => {}, setPage }: P
           </div>
           <ImportHelp kind="inventory" />
           <InventoryTable rows={rows} selectedSku={selectedRow?.sku ?? ''} onSelect={setSelectedSku} />
+          <PaginationControls
+            page={pageNumber}
+            pageSize={pageSize}
+            totalCount={totalCount}
+            totalPages={totalPages}
+            onPageChange={setPageNumber}
+            onPageSizeChange={(size) => { setPageSize(size); setPageNumber(1) }}
+          />
           {importError && (
             <div style={{ marginTop: '12px', color: importError.startsWith('Imported') ? '#1b5e20' : '#d32f2f' }}>
               {importError}
             </div>
           )}
           <div className="inventory-stats">
-            <div><span>Available Items</span><strong>{availableRows.length}</strong></div>
-            <div><span>Available Stock</span><strong>{totalStockUnits}</strong></div>
-            <div><span>Available Items Value</span><strong>{formatMoney(totalInventoryValue)}</strong></div>
-            <div><span>Low Stock</span><strong>{rows.filter((row) => row.status === 'Low').length}</strong></div>
-            <div><span>Out of Stock</span><strong>{rows.filter((row) => row.status.includes('Out')).length}</strong></div>
+            <div><span>Available Items on Page</span><strong>{availableRows.length}</strong></div>
+            <div><span>Available Stock on Page</span><strong>{totalStockUnits}</strong></div>
+            <div><span>Page Inventory Value</span><strong>{formatMoney(totalInventoryValue)}</strong></div>
+            <div><span>Low Stock on Page</span><strong>{rows.filter((row) => row.status === 'Low').length}</strong></div>
+            <div><span>Out of Stock on Page</span><strong>{rows.filter((row) => row.status.includes('Out')).length}</strong></div>
           </div>
         </section>
         <DetailPanel

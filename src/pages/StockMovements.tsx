@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState } from 'react'
 import { api, type StockMovementRow } from '../api'
 import { exportRows } from '../utils/export'
 import type { PageDefinition, PageRenderProps } from '../types'
@@ -9,7 +9,6 @@ export function StockMovements({ setPage }: Partial<PageRenderProps>) {
   const [searchFilter, setSearchFilter] = useState('')
   const [typeFilter, setTypeFilter] = useState('ALL')
   const [page, setPageNum] = useState(1)
-  const [totalCount, setTotalCount] = useState(0)
   const [hasMore, setHasMore] = useState(false)
 
   const loadMovements = async (pageNumber: number, search: string, type: string) => {
@@ -21,7 +20,6 @@ export function StockMovements({ setPage }: Partial<PageRenderProps>) {
       } else {
         setMovements((prev) => [...prev, ...res.rows])
       }
-      setTotalCount(res.count || 0)
       setHasMore(res.rows.length === 50)
     } catch (e) {
       console.error(e)
@@ -34,28 +32,6 @@ export function StockMovements({ setPage }: Partial<PageRenderProps>) {
     setPageNum(1)
     loadMovements(1, searchFilter, typeFilter)
   }, [searchFilter, typeFilter])
-
-  // Summary Metrics from current view
-  const metrics = useMemo(() => {
-    let inflow = 0
-    let outflow = 0
-    let shrinkage = 0
-
-    movements.forEach((m) => {
-      const q = Number(m.quantity || 0)
-      if (['PURCHASE', 'OPENING_STOCK', 'CUSTOMER_RETURN'].includes(m.type) || q > 0) {
-        inflow += Math.max(0, q)
-      }
-      if (m.type === 'SALE') {
-        outflow += Math.abs(q)
-      }
-      if (['DAMAGE', 'LOSS', 'THEFT', 'PHYSICAL_COUNT'].includes(m.type) && q < 0) {
-        shrinkage += Math.abs(q)
-      }
-    })
-
-    return { inflow, outflow, shrinkage }
-  }, [movements])
 
   const handleExport = () => {
     if (movements.length === 0) return
@@ -91,6 +67,12 @@ export function StockMovements({ setPage }: Partial<PageRenderProps>) {
       case 'OPENING_STOCK':
         return { background: 'rgba(234, 179, 8, 0.15)', color: '#facc15', border: '1px solid rgba(234, 179, 8, 0.3)' }
       case 'CUSTOMER_RETURN':
+        return { background: 'rgba(20, 184, 166, 0.15)', color: '#2dd4bf', border: '1px solid rgba(20, 184, 166, 0.3)' }
+      case 'SHOWCASE_OUT':
+        return { background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.3)' }
+      case 'SHOWCASE_RETURN':
+        return { background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', border: '1px solid rgba(34, 197, 94, 0.3)' }
+      case 'SHOWCASE_SALE':
         return { background: 'rgba(20, 184, 166, 0.15)', color: '#2dd4bf', border: '1px solid rgba(20, 184, 166, 0.3)' }
       default:
         return { background: 'rgba(148, 163, 184, 0.15)', color: '#94a3b8', border: '1px solid rgba(148, 163, 184, 0.3)' }
@@ -154,80 +136,6 @@ export function StockMovements({ setPage }: Partial<PageRenderProps>) {
         </div>
       </header>
 
-      {/* KPI Summary Cards */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-          gap: '1rem',
-          marginBottom: '1.5rem',
-        }}
-      >
-        <div
-          style={{
-            background: 'var(--panel, #141d2e)',
-            borderRadius: 'var(--radius-md, 12px)',
-            border: '1px solid var(--line, rgba(148, 163, 184, 0.14))',
-            padding: '1.25rem',
-          }}
-        >
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Ledger Entries
-          </div>
-          <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--text-strong, #f1f5f9)', marginTop: '0.2rem' }}>
-            {totalCount} <span style={{ fontSize: '0.85rem', fontWeight: 400, color: 'var(--text-soft, #94a3b8)' }}>movements</span>
-          </div>
-        </div>
-
-        <div
-          style={{
-            background: 'var(--panel, #141d2e)',
-            borderRadius: 'var(--radius-md, 12px)',
-            border: '1px solid var(--line, rgba(148, 163, 184, 0.14))',
-            padding: '1.25rem',
-          }}
-        >
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Total Inflow Recorded
-          </div>
-          <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--success, #22c55e)', marginTop: '0.2rem' }}>
-            +{metrics.inflow} <span style={{ fontSize: '0.85rem', fontWeight: 400, color: 'var(--text-soft, #94a3b8)' }}>units added</span>
-          </div>
-        </div>
-
-        <div
-          style={{
-            background: 'var(--panel, #141d2e)',
-            borderRadius: 'var(--radius-md, 12px)',
-            border: '1px solid var(--line, rgba(148, 163, 184, 0.14))',
-            padding: '1.25rem',
-          }}
-        >
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Sales Deductions
-          </div>
-          <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--cyan, #3b82f6)', marginTop: '0.2rem' }}>
-            -{metrics.outflow} <span style={{ fontSize: '0.85rem', fontWeight: 400, color: 'var(--text-soft, #94a3b8)' }}>units sold</span>
-          </div>
-        </div>
-
-        <div
-          style={{
-            background: 'var(--panel, #141d2e)',
-            borderRadius: 'var(--radius-md, 12px)',
-            border: '1px solid var(--line, rgba(148, 163, 184, 0.14))',
-            padding: '1.25rem',
-          }}
-        >
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Shrinkage & Discrepancies
-          </div>
-          <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--danger, #ef4444)', marginTop: '0.2rem' }}>
-            -{metrics.shrinkage} <span style={{ fontSize: '0.85rem', fontWeight: 400, color: 'var(--text-soft, #94a3b8)' }}>units lost/damaged</span>
-          </div>
-        </div>
-      </div>
-
       {/* Filter and Search Bar */}
       <div
         style={{
@@ -283,6 +191,9 @@ export function StockMovements({ setPage }: Partial<PageRenderProps>) {
             <option value="SALE">Sale (-)</option>
             <option value="OPENING_STOCK">Opening Stock</option>
             <option value="CUSTOMER_RETURN">Customer Return</option>
+            <option value="SHOWCASE_OUT">Sent to Showcase</option>
+            <option value="SHOWCASE_RETURN">Showcase Return</option>
+            <option value="SHOWCASE_SALE">Showcase Sale</option>
             <option value="SUPPLIER_RETURN">Supplier Return</option>
             <option value="ADJUSTMENT">General Adjustment</option>
           </select>
@@ -358,7 +269,9 @@ export function StockMovements({ setPage }: Partial<PageRenderProps>) {
                         whiteSpace: 'nowrap',
                       }}
                     >
-                      {isPositive ? `+${m.quantity}` : m.quantity}
+                      {m.type === 'SHOWCASE_SALE'
+                        ? `Sold ${m.showcaseQuantity || 0}`
+                        : isPositive ? `+${m.quantity}` : m.quantity}
                     </td>
                     <td style={{ padding: '0.9rem 1rem', textAlign: 'center', whiteSpace: 'nowrap', color: 'var(--text-soft, #94a3b8)', fontFamily: 'var(--mono)' }}>
                       <span>{m.previousStock}</span>

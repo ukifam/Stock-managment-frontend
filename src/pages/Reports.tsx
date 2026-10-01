@@ -287,10 +287,30 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
 
   useEffect(() => {
     setViewScope(reportScope)
+    setCreditFilter((current) => {
+      if (reportScope === 'sales' && current === 'purchasesCredit') return 'all'
+      if (reportScope === 'purchases' && current === 'salesCredit') return 'all'
+      if (reportScope === 'expenses' && current !== 'all') return 'all'
+      return current
+    })
   }, [reportScope])
 
   const creditFilterLabel =
-    creditFilter === 'all' ? 'All transactions' : creditFilter === 'salesCredit' ? 'Sales on Credit' : 'Purchases on Credit'
+    creditFilter === 'all'
+      ? viewScope === 'sales' ? 'All sales' : viewScope === 'purchases' ? 'All purchases' : viewScope === 'expenses' ? 'All expenses' : 'All transactions'
+      : creditFilter === 'salesCredit' ? 'Sales on Credit' : 'Purchases on Credit'
+
+  const creditFilterOptions = viewScope === 'sales'
+    ? [{ value: 'all' as const, label: 'All transactions' }, { value: 'salesCredit' as const, label: 'Sales on credit' }]
+    : viewScope === 'purchases'
+    ? [{ value: 'all' as const, label: 'All transactions' }, { value: 'purchasesCredit' as const, label: 'Purchases on credit' }]
+    : viewScope === 'expenses'
+    ? []
+    : [
+        { value: 'all' as const, label: 'All transactions' },
+        { value: 'salesCredit' as const, label: 'Sales on credit' },
+        { value: 'purchasesCredit' as const, label: 'Purchases on credit' },
+      ]
 
   const formatAmount = (val: string | number | undefined) => {
     const numberValue = parseNumber(val)
@@ -308,7 +328,28 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
 
   const changeScope = (scope: ReportScope) => {
     setViewScope(scope)
+    if (
+      (scope === 'sales' && creditFilter === 'purchasesCredit')
+      || (scope === 'purchases' && creditFilter === 'salesCredit')
+      || scope === 'expenses'
+    ) {
+      setCreditFilter('all')
+    }
     onReportScopeChange?.(scope)
+  }
+
+  const changeCreditFilter = (filter: CreditFilter) => {
+    setCreditFilter(filter)
+    if (filter === 'salesCredit') {
+      setViewScope('sales')
+      onReportScopeChange?.('sales')
+    } else if (filter === 'purchasesCredit') {
+      setViewScope('purchases')
+      onReportScopeChange?.('purchases')
+    } else {
+      setViewScope('all')
+      onReportScopeChange?.('all')
+    }
   }
 
   const soldGoodsStatus = getProfitStatus(reports.summary?.netProfit)
@@ -316,63 +357,6 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
   const generalStatus = getProfitStatus(generalResult)
   const generalResultText = formatSignedAmount(generalResult, currency)
 
-  const transactionSummaryRows = [
-    {
-      category: 'Purchases',
-      total: reports.summary?.totalPurchases,
-      cash: reports.summary?.purchasesCash ?? '-',
-      credit: reports.summary?.purchasesOnCredit ?? '-',
-      outstanding: reports.summary?.purchasesOnCredit ?? '-',
-    },
-    {
-      category: 'Sales',
-      total: reports.summary?.totalSales,
-      cash: reports.summary?.salesCash ?? '-',
-      credit: reports.summary?.salesOnCredit ?? '-',
-      outstanding: reports.summary?.salesOnCredit ?? '-',
-    },
-    { category: 'Monthly Profit', total: generalResultText, cash: generalStatus.label, credit: '-', outstanding: '-' },
-    { category: cogsLabel, total: reports.summary?.costOfGoodsSold ?? '-', cash: '-', credit: '-', outstanding: '-' },
-    { category: 'Gross Profit', total: reports.summary?.grossProfit ?? '-', cash: '-', credit: '-', outstanding: '-' },
-    {
-      category: 'Expenses',
-      total: reports.summary?.totalExpenses ?? reports.summary?.taxes ?? '-',
-      cash: '-',
-      credit: '-',
-      outstanding: '-',
-    },
-    { category: 'Net Profit', total: reports.summary?.netProfit ?? '-', cash: soldGoodsStatus.label, credit: '-', outstanding: '-' },
-    {
-      category: 'Payments (Made)',
-      total: reports.summary?.totalPayments ?? '-',
-      cash: reports.summary?.totalPayments ?? '-',
-      credit: '-',
-      outstanding: '-',
-    },
-    {
-      category: 'Inventory Valuation',
-      total: reports.summary?.totalInventoryValuation ?? '-',
-      cash: `${reports.summary?.totalStockUnits ?? 0} units in stock`,
-      credit: `${reports.summary?.lowStockCount ?? 0} low stock`,
-      outstanding: `${reports.summary?.outOfStockCount ?? 0} out of stock`,
-    },
-    {
-      category: 'Stock Shrinkage / Loss',
-      total: reports.summary?.totalLossValue ?? '-',
-      cash: `${reports.summary?.totalLossUnits ?? 0} units lost/damaged`,
-      credit: '-',
-      outstanding: '-',
-    },
-  ]
-
-  const visibleSummaryRows =
-    viewScope === 'all'
-      ? transactionSummaryRows
-      : viewScope === 'purchases'
-      ? [transactionSummaryRows[0]]
-      : viewScope === 'sales'
-      ? [transactionSummaryRows[1], transactionSummaryRows[2], transactionSummaryRows[3], transactionSummaryRows[4], transactionSummaryRows[6]]
-      : [transactionSummaryRows[5], transactionSummaryRows[6]]
   const grossMargin =
     reports.summary?.grossProfit && reports.summary?.totalSales
       ? (
@@ -381,13 +365,6 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
         ).toFixed(1)
       : null
 
-  const reportHighlights = [
-    { label: 'Period', value: `${fromDate} → ${toDate}` },
-    { label: 'Filter', value: creditFilterLabel },
-    { label: 'Monthly Profit', value: generalStatus.label },
-    { label: 'Transactions', value: String(reports.summary?.totalTransactions ?? ledgerRows.length) },
-    { label: 'Currency', value: currency },
-  ]
   useEffect(() => {
     let isMounted = true
 
@@ -905,13 +882,13 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
           const showProfitColumn = group.key === 'sales'
           const headerColumns = 7 + (showPurchaseColumn ? 1 : 0) + (showUnitColumn ? 1 : 0) + (showQtyColumn ? 1 : 0) + (showProfitColumn ? 1 : 0)
           return (
-            <div key={group.key} className="ledger-group">
+              <div key={group.key} className={`ledger-group ledger-group-${group.key}`}>
               <div className="ledger-heading subsection-heading">
                 <h3>{group.title}</h3>
                 <p>{group.rows.length} entries • Amounts in {currency} • {formatAmount(totals.amount)}</p>
               </div>
               <div className="table-shell ledger-shell">
-                <table className="ledger-table">
+                <table className={`ledger-table ledger-table-${group.key}`}>
                   <thead>
                     <tr>
                       <th>Ref / ID</th>
@@ -960,7 +937,7 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
                   {group.rows.length > 0 && (
                     <tfoot>
                       <tr className={`ledger-total ledger-total-${group.key}`}>
-                        <td colSpan={3}>
+                        <td colSpan={2}>
                           <strong>{group.title} Total</strong>
                         </td>
                         {showPurchaseColumn && (
@@ -1029,28 +1006,25 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
                 {scope === 'all' ? 'General' : scope.charAt(0).toUpperCase() + scope.slice(1)}
               </button>
             ))}
-          </div>
-          <div className="report-filters-row">
-            <div className="filter-group">
-              <label>
-                From
-                <input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} />
-              </label>
-              <label>
-                To
-                <input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} />
-              </label>
-            </div>
-            <div className="credit-filter">
-              <button type="button" className={`filter-button filter-all ${creditFilter === 'all' ? 'selected' : ''}`} onClick={() => setCreditFilter('all')}>
-                All
-              </button>
-              <button type="button" className={`filter-button filter-sales ${creditFilter === 'salesCredit' ? 'selected' : ''}`} onClick={() => setCreditFilter('salesCredit')}>
-                Sales Credit
-              </button>
-              <button type="button" className={`filter-button filter-purchase ${creditFilter === 'purchasesCredit' ? 'selected' : ''}`} onClick={() => setCreditFilter('purchasesCredit')}>
-                Purchase Credit
-              </button>
+            <div className="report-inline-filters">
+              {creditFilterOptions.length > 0 && (
+                <label className="credit-filter">
+                  <span>Credit</span>
+                  <select aria-label="Credit filter" value={creditFilter} onChange={(event) => changeCreditFilter(event.target.value as CreditFilter)}>
+                    {creditFilterOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </label>
+              )}
+              <div className="filter-group report-date-filters">
+                <label>
+                  From
+                  <input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} />
+                </label>
+                <label>
+                  To
+                  <input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} />
+                </label>
+              </div>
             </div>
           </div>
         </section>
@@ -1092,7 +1066,7 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
             </div>
           </header>
 
-          <section className="report-hero" aria-label="Report overview">
+          {/* <section className="report-hero" aria-label="Report overview">
             <div className="report-hero-copy">
               <span className="report-eyebrow">Business snapshot</span>
               <h2>Clear view of performance for the selected period</h2>
@@ -1106,78 +1080,109 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
                 </div>
               ))}
             </div>
-          </section>
+          </section> */}
 
           {reports.summary && (
             <section className="report-summary-block">
-              <div className="report-summary-groups">
-                <div className="summary-group-card income-group">
-                  <h3>Income</h3>
-                  <div className="summary-group-row">
-                    <span>Sales</span>
-                    <strong>{reports.summary.totalSales ?? '-'}</strong>
+              {viewScope === 'all' && (
+                <>
+                  <div className="report-summary-groups">
+                    <div className="summary-group-card income-group">
+                      <h3>Income</h3>
+                      <div className="summary-group-row">
+                        <span>Sales</span>
+                        <strong>{reports.summary.totalSales ?? '-'}</strong>
+                      </div>
+                    </div>
+                    <div className="summary-group-card expenses-group">
+                      <h3>Expenses</h3>
+                      <div className="summary-group-row">
+                        <span>Purchases</span>
+                        <strong>{reports.summary.totalPurchases ?? '-'}</strong>
+                      </div>
+                      <div className="summary-group-row">
+                        <span>{cogsLabel}</span>
+                        <strong>{reports.summary.costOfGoodsSold ?? '-'}</strong>
+                      </div>
+                      <div className="summary-group-row">
+                        <span>Expenses</span>
+                        <strong>{reports.summary.totalExpenses ?? reports.summary.taxes ?? '-'}</strong>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="report-profit-summary">
+                    <article className="summary-card gross">
+                      <span className="card-icon">
+                        <MetricIcon kind="gross" />
+                      </span>
+                      <h3>Gross Profit</h3>
+                      <strong>{reports.summary.grossProfit ?? '-'}</strong>
+                      <small>{grossMargin ? `${grossMargin}% gross margin` : `Sales minus ${cogsLabel.toLowerCase()}`}</small>
+                    </article>
+                    <article className={`summary-card net ${soldGoodsStatus.tone}`}>
+                      <span className="card-icon">
+                        <MetricIcon kind="net" />
+                      </span>
+                      <h3>Net Profit</h3>
+                      <strong>{reports.summary.netProfit ?? '-'}</strong>
+                      <small>Gross profit minus expenses.</small>
+                    </article>
+                  </div>
+                </>
+              )}
+              {viewScope === 'sales' && (
+                <div className="report-summary-groups">
+                  <div className="summary-group-card income-group">
+                    <h3>Sales</h3>
+                    <div className="summary-group-row">
+                      <span>Total sales</span>
+                      <strong>{reports.summary.totalSales ?? '-'}</strong>
+                    </div>
+                  </div>
+                  <div className="summary-group-card credit-group">
+                    <h3>Sales on Credit</h3>
+                    <div className="summary-group-row">
+                      <span>Total sales on credit</span>
+                      <strong>{reports.summary.totalSalesOnCredit ?? '-'}</strong>
+                    </div>
                   </div>
                 </div>
-                <div className="summary-group-card expenses-group">
-                  <h3>Expenses</h3>
-                  <div className="summary-group-row">
-                    <span>Purchases</span>
-                    <strong>{reports.summary.totalPurchases ?? '-'}</strong>
+              )}
+              {viewScope === 'purchases' && (
+                <div className="report-summary-groups">
+                  <div className="summary-group-card expenses-group">
+                    <h3>Purchases</h3>
+                    <div className="summary-group-row">
+                      <span>Total purchases</span>
+                      <strong>{reports.summary.totalPurchases ?? '-'}</strong>
+                    </div>
                   </div>
-                  <div className="summary-group-row">
-                    <span>{cogsLabel}</span>
-                    <strong>{reports.summary.costOfGoodsSold ?? '-'}</strong>
-                  </div>
-                  <div className="summary-group-row">
-                    <span>Expenses</span>
-                    <strong>{reports.summary.totalExpenses ?? reports.summary.taxes ?? '-'}</strong>
-                  </div>
-                </div>
-                <div className="summary-group-card inventory-group">
-                  <h3>Inventory & Assets</h3>
-                  <div className="summary-group-row">
-                    <span>Stock Asset Value</span>
-                    <strong>{reports.inventoryValuation?.totalValuation ?? reports.summary?.totalInventoryValuation ?? '-'}</strong>
-                  </div>
-                  <div className="summary-group-row">
-                    <span>Total Quantity</span>
-                    <strong>{reports.inventoryValuation?.totalUnits ?? reports.summary?.totalStockUnits ?? '-'} units</strong>
-                  </div>
-                  <div className="summary-group-row">
-                    <span>Stock Loss / Shrinkage</span>
-                    <strong style={{ color: '#f87171' }}>{reports.summary?.totalLossValue ?? '-'}</strong>
+                  <div className="summary-group-card credit-group">
+                    <h3>Purchases on Credit</h3>
+                    <div className="summary-group-row">
+                      <span>Total purchases on credit</span>
+                      <strong>{reports.summary.totalPurchasesOnCredit ?? '-'}</strong>
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div className="report-profit-summary">
-                <article className={`summary-card result ${generalStatus.tone}`}>
-                  <span className="result-label">Monthly Profit</span>
-                  <strong>{generalResultText}</strong>
-                  <small>{generalStatus.label}: sales minus all purchases.</small>
-                </article>
-                <article className="summary-card gross">
-                  <span className="card-icon">
-                    <MetricIcon kind="gross" />
-                  </span>
-                  <h3>Gross Profit</h3>
-                  <strong>{reports.summary.grossProfit ?? '-'}</strong>
-                  <small>{grossMargin ? `${grossMargin}% gross margin` : `Sales minus ${cogsLabel.toLowerCase()}`}</small>
-                </article>
-                <article className={`summary-card net ${soldGoodsStatus.tone}`}>
-                  <span className="card-icon">
-                    <MetricIcon kind="net" />
-                  </span>
-                  <h3>Net Profit</h3>
-                  <strong>{reports.summary.netProfit ?? '-'}</strong>
-                  <small>Gross profit minus expenses.</small>
-                </article>
-              </div>
+              )}
+              {viewScope === 'expenses' && (
+                <div className="report-summary-groups single-summary">
+                  <div className="summary-group-card expenses-group">
+                    <h3>Expenses</h3>
+                    <div className="summary-group-row">
+                      <span>Total expenses</span>
+                      <strong>{reports.summary.totalExpenses ?? reports.summary.taxes ?? '-'}</strong>
+                    </div>
+                  </div>
+                </div>
+              )}
             </section>
           )}
           </div>
 
           <div className="report-tables-section">
-          <section className="transaction-summary">
+          {/* <section className="transaction-summary">
             <div className="section-title">
               <h2>Financial Summary</h2>
               <p>Gross profit = total sales − purchase of sold items. Net profit = gross profit − all expenses for the selected period.</p>
@@ -1206,7 +1211,7 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
                 </tbody>
               </table>
             </div>
-          </section>
+          </section> */}
 
           {renderLedgerTable()}
           </div>

@@ -8,17 +8,22 @@ export const page = { id: 'dashboard' as const, label: 'Dashboard', icon: 'grid'
 
 type DashboardProps = ThemePageProps & {
   onNewEntry?: () => void
+  activeShopName?: string
 }
 
-export function Dashboard({ theme, toggleTheme, onNewEntry }: DashboardProps) {
-  const [dashboard, setDashboard] = useState<DashboardResponse>({ metrics: [], salesBars: [], lowStock: [], catalog: [] })
+export function Dashboard({ theme, toggleTheme, onNewEntry, activeShopName }: DashboardProps) {
+  const [dashboard, setDashboard] = useState<DashboardResponse>({ categories: [], metrics: [], salesBars: [], salesLabels: [], lowStock: [], catalog: [] })
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
+  const [category, setCategory] = useState('')
+  const [stockStatus, setStockStatus] = useState('all')
   const [error, setError] = useState('')
 
   useEffect(() => {
     let isMounted = true
 
     const loadDashboard = () => {
-      api.dashboard()
+      api.dashboard({ from: fromDate, to: toDate, category, stockStatus: stockStatus === 'all' ? undefined : stockStatus })
         .then((response) => {
           if (!isMounted) return
           setDashboard(response)
@@ -38,12 +43,53 @@ export function Dashboard({ theme, toggleTheme, onNewEntry }: DashboardProps) {
       window.clearInterval(refreshId)
       window.removeEventListener('focus', loadDashboard)
     }
-  }, [])
+  }, [fromDate, toDate, category, stockStatus])
+
+  const setDatePreset = (days: number) => {
+    const end = new Date()
+    const start = new Date(end)
+    start.setDate(start.getDate() - days + 1)
+    setFromDate(formatDateInput(start))
+    setToDate(formatDateInput(end))
+  }
+
+  const clearFilters = () => {
+    setFromDate('')
+    setToDate('')
+    setCategory('')
+    setStockStatus('all')
+  }
 
   return (
     <>
-      <Topbar title="" placeholder="Global system search..." theme={theme} toggleTheme={toggleTheme} />
+      <Topbar title={activeShopName ? `Shop Dashboard: ${activeShopName}` : ''} placeholder="Global system search..." theme={theme} toggleTheme={toggleTheme} />
       <div className="dashboard page-pad">
+        <section className="dashboard-filters" aria-label="Dashboard filters">
+          <div className="dashboard-filter-dates">
+            <label>From<input type="date" value={fromDate} max={toDate || formatDateInput(new Date())} onChange={(event) => setFromDate(event.target.value)} /></label>
+            <label>To<input type="date" value={toDate} min={fromDate || undefined} max={formatDateInput(new Date())} onChange={(event) => setToDate(event.target.value)} /></label>
+          </div>
+          <div className="dashboard-filter-presets" aria-label="Date presets">
+            <button type="button" onClick={() => setDatePreset(7)}>7 days</button>
+            <button type="button" onClick={() => setDatePreset(30)}>30 days</button>
+            <button type="button" onClick={() => setDatePreset(90)}>90 days</button>
+          </div>
+          <label className="dashboard-filter-select">Category
+            <select value={category} onChange={(event) => setCategory(event.target.value)}>
+              <option value="">All categories</option>
+              {dashboard.categories.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </label>
+          <label className="dashboard-filter-select">Stock
+            <select value={stockStatus} onChange={(event) => setStockStatus(event.target.value)}>
+              <option value="all">All stock</option>
+              <option value="available">In stock</option>
+              <option value="low">Low stock</option>
+              <option value="out">Out of stock</option>
+            </select>
+          </label>
+          <button className="dashboard-filter-reset" type="button" onClick={clearFilters}>Reset</button>
+        </section>
         {error && <div style={{ color: '#ff6f00', padding: '8px', marginBottom: '12px', backgroundColor: '#fff3e0', borderRadius: '4px', fontSize: '14px' }}>{error}</div>}
         <section className="metric-grid">
           {dashboard.metrics.map((metric) => (
@@ -59,13 +105,12 @@ export function Dashboard({ theme, toggleTheme, onNewEntry }: DashboardProps) {
         <section className="dashboard-main">
           <article className="panel sales-panel">
             <div className="panel-head">
-              <div><h2>Today's Sales Activity</h2><p>Real-time throughput metrics</p></div>
-              <div className="segmented"><button type="button">Hourly</button><button type="button" className="selected">Live Stream</button></div>
+              <div><h2>Sales Activity</h2><p>Sales within the selected date range</p></div>
             </div>
             <div className="bar-chart" aria-label="Hourly sales chart">
               {dashboard.salesBars.map((height, index) => <i key={`${height}-${index}`} style={{ '--h': `${height}%` } as CSSProperties} />)}
             </div>
-            <div className="chart-times"><span>08:00</span><span>10:00</span><span>12:00</span><span>14:00</span><span>16:00</span><span>18:00</span></div>
+            <div className="chart-times">{dashboard.salesLabels.map((label, index) => <span key={`${label}-${index}`}>{label}</span>)}</div>
           </article>
 
           <article className="panel alerts-panel">
@@ -96,4 +141,11 @@ export function Dashboard({ theme, toggleTheme, onNewEntry }: DashboardProps) {
       </div>
     </>
   )
+}
+
+function formatDateInput(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }

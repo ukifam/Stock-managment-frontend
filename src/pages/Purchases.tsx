@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type React from 'react'
 import { api, type EntryStatus, type PurchaseRow, type PurchaseUpdatePayload } from '../api'
 import { Topbar } from '../components/Topbar'
+import { PaginationControls } from '../components/PaginationControls'
 import { ImportHelp } from '../components/ImportHelp'
 import { CameraScanner } from '../components/CameraScanner'
 import { useMemo } from 'react'
@@ -45,6 +46,11 @@ export function Purchases({
 }: PurchasesProps) {
   const [isAdding, setIsAdding] = useState(startAdding)
   const [rows, setRows] = useState<PurchaseRow[]>([])
+  const [pageNumber, setPageNumber] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
+  const [totalCount, setTotalCount] = useState(0)
+  const [totalPages, setTotalPages] = useState(0)
+  const [listRevision, setListRevision] = useState(0)
   const [filterFrom, setFilterFrom] = useState('')
   const [filterTo, setFilterTo] = useState('')
   const [appliedFilterFrom, setAppliedFilterFrom] = useState('')
@@ -70,11 +76,18 @@ export function Purchases({
   const isManual = entryMode === 'manual'
 
   useEffect(() => {
-    api.purchases(undefined, appliedFilterFrom, appliedFilterTo).then((response) => {
+    let isMounted = true
+    api.purchases(undefined, appliedFilterFrom, appliedFilterTo, pageNumber, pageSize).then((response) => {
+      if (!isMounted) return
       setRows(response.rows)
-      setSelectedId((current) => current || response.rows[0]?.id || '')
-    }).catch(() => setRows([]))
-  }, [appliedFilterFrom, appliedFilterTo])
+      setTotalCount(response.count)
+      setTotalPages(response.totalPages ?? 0)
+      setSelectedId((current) => response.rows.some((row) => row.id === current) ? current : response.rows[0]?.id || '')
+      const lastPage = Math.max(1, response.totalPages ?? 1)
+      if (pageNumber > lastPage) setPageNumber(lastPage)
+    }).catch(() => { if (isMounted) setRows([]) })
+    return () => { isMounted = false }
+  }, [appliedFilterFrom, appliedFilterTo, pageNumber, pageSize, listRevision])
 
   const selectedPurchase = rows.find((row) => row.id === selectedId) ?? rows[0]
 
@@ -128,7 +141,7 @@ export function Purchases({
       const result = await api.bulkImportPurchases(payloads)
       const skippedNote = result.skipped ? ` (${result.skipped} skipped)` : ''
       setImportError(`Imported ${result.count} purchases successfully${skippedNote}.`)
-      api.purchases(undefined, appliedFilterFrom, appliedFilterTo).then((response) => setRows(response.rows)).catch(() => undefined)
+      setListRevision((current) => current + 1)
     } catch (error) {
       setImportError(error instanceof Error ? error.message : 'Failed to import file.')
     } finally {
@@ -143,7 +156,7 @@ export function Purchases({
       const updated = await api.updatePurchaseStatus(id, status)
       setRows((current) => current.map((row) => row.id === id ? updated : row))
     } catch {
-      api.purchases(undefined, appliedFilterFrom, appliedFilterTo).then((response) => setRows(response.rows)).catch(() => undefined)
+      api.purchases(undefined, appliedFilterFrom, appliedFilterTo, pageNumber, pageSize).then((response) => setRows(response.rows)).catch(() => undefined)
       window.alert('Could not update status. Please try again.')
     }
   }
@@ -163,6 +176,7 @@ export function Purchases({
       await api.deletePurchase(id)
       setRows((current) => current.filter((r) => r.id !== id))
       setSelectedId('')
+      setListRevision((current) => current + 1)
       setImportError('Purchase deleted successfully.')
     } catch (error) {
       window.alert(error instanceof Error ? error.message : 'Could not delete purchase.')
@@ -245,8 +259,11 @@ export function Purchases({
           }]
 
       await Promise.all(payloads.map((payload) => api.createPurchase(payload)))
-      const refreshed = await api.purchases(undefined, appliedFilterFrom, appliedFilterTo)
+      const refreshed = await api.purchases(undefined, appliedFilterFrom, appliedFilterTo, 1, pageSize)
       setRows(refreshed.rows)
+      setTotalCount(refreshed.count)
+      setTotalPages(refreshed.totalPages ?? 0)
+      setPageNumber(1)
       setSelectedId(refreshed.rows[0]?.id || '')
       setIsAdding(false)
       setManualItem('')
@@ -485,7 +502,7 @@ export function Purchases({
           >
             <span className="subtab-icon">🛒</span>
             <span className="subtab-label">All Purchases</span>
-            <span className="subtab-badge">{rows.length}</span>
+            <span className="subtab-badge">{totalCount}</span>
           </button>
           <button
             type="button"
@@ -519,8 +536,8 @@ export function Purchases({
               <div className="toolbar">
                 <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>From<input type="date" value={filterFrom} onChange={(event) => setFilterFrom(event.target.value)} /></label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>To<input type="date" value={filterTo} onChange={(event) => setFilterTo(event.target.value)} /></label>
-                <button type="button" onClick={() => { setAppliedFilterFrom(filterFrom); setAppliedFilterTo(filterTo) }}>Apply</button>
-                <button type="button" onClick={() => { setFilterFrom(''); setFilterTo(''); setAppliedFilterFrom(''); setAppliedFilterTo('') }}>Clear</button>
+                <button type="button" onClick={() => { setPageNumber(1); setAppliedFilterFrom(filterFrom); setAppliedFilterTo(filterTo) }}>Apply</button>
+                <button type="button" onClick={() => { setPageNumber(1); setFilterFrom(''); setFilterTo(''); setAppliedFilterFrom(''); setAppliedFilterTo('') }}>Clear</button>
                 <button type="button" onClick={handleExport}>Export CSV</button>
                 {onOpenReport && (
                   <button type="button" onClick={onOpenReport}>Purchase Report</button>
@@ -548,15 +565,23 @@ export function Purchases({
                 </tbody>
               </table>
             </div>
+            <PaginationControls
+              page={pageNumber}
+              pageSize={pageSize}
+              totalCount={totalCount}
+              totalPages={totalPages}
+              onPageChange={setPageNumber}
+              onPageSizeChange={(size) => { setPageSize(size); setPageNumber(1) }}
+            />
             {importError && (
               <div style={{ marginTop: '12px', color: importError.startsWith('Imported') ? '#1b5e20' : '#d32f2f' }}>
                 {importError}
               </div>
             )}
             <div className="inventory-stats">
-              <div><span>Orders</span><strong>{rows.length}</strong></div>
-              <div><span>Filtered Total</span><strong>{formatMoney(filteredPurchaseTotal, currency)}</strong></div>
-              <div><span>Filtered Qty</span><strong>{filteredPurchaseQuantity}</strong></div>
+              <div><span>Orders</span><strong>{totalCount}</strong></div>
+              <div><span>Page Total</span><strong>{formatMoney(filteredPurchaseTotal, currency)}</strong></div>
+              <div><span>Page Qty</span><strong>{filteredPurchaseQuantity}</strong></div>
               <div><span>Received</span><strong>{rows.filter((row) => row.status === 'Received').length}</strong></div>
               <div><span>Returned</span><strong>{rows.filter((row) => row.status === 'Returned').length}</strong></div>
             </div>
