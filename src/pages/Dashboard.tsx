@@ -2,16 +2,18 @@ import type { CSSProperties } from 'react'
 import { useEffect, useState } from 'react'
 import { Topbar } from '../components/Topbar'
 import { api, type DashboardResponse } from '../api'
-import type { ThemePageProps } from '../types'
-
-export const page = { id: 'dashboard' as const, label: 'Dashboard', icon: 'grid' }
+import { useAuth } from '../context/AuthContext'
+import type { Page, ThemePageProps } from '../types'
 
 type DashboardProps = ThemePageProps & {
   onNewEntry?: () => void
   activeShopName?: string
+  processingEnabled?: boolean
+  setPage?: (page: Page) => void
 }
 
-export function Dashboard({ theme, toggleTheme, onNewEntry, activeShopName }: DashboardProps) {
+export function Dashboard({ theme, toggleTheme, onNewEntry, activeShopName, processingEnabled = false, setPage }: DashboardProps) {
+  const { user } = useAuth()
   const [dashboard, setDashboard] = useState<DashboardResponse>({ categories: [], metrics: [], salesBars: [], salesLabels: [], lowStock: [], catalog: [] })
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
@@ -19,30 +21,22 @@ export function Dashboard({ theme, toggleTheme, onNewEntry, activeShopName }: Da
   const [stockStatus, setStockStatus] = useState('all')
   const [error, setError] = useState('')
 
+  const isAdmin = String(user?.role || '').toLowerCase() === 'admin'
+    || String(user?.role || '').toLowerCase().replace(/[\s-]+/g, '_') === 'system_admin'
+  const canViewProduction = isAdmin
+    || Boolean(user?.permissions?.find((p) => p.module === 'production')?.actions.includes('view'))
+
   useEffect(() => {
     let isMounted = true
-
     const loadDashboard = () => {
       api.dashboard({ from: fromDate, to: toDate, category, stockStatus: stockStatus === 'all' ? undefined : stockStatus })
-        .then((response) => {
-          if (!isMounted) return
-          setDashboard(response)
-          setError('')
-        })
-        .catch(() => {
-          if (isMounted) setError('Could not refresh dashboard data.')
-        })
+        .then((response) => { if (isMounted) { setDashboard(response); setError('') } })
+        .catch(() => { if (isMounted) setError('Could not refresh dashboard data.') })
     }
-
     loadDashboard()
     const refreshId = window.setInterval(loadDashboard, 5000)
     window.addEventListener('focus', loadDashboard)
-
-    return () => {
-      isMounted = false
-      window.clearInterval(refreshId)
-      window.removeEventListener('focus', loadDashboard)
-    }
+    return () => { isMounted = false; window.clearInterval(refreshId); window.removeEventListener('focus', loadDashboard) }
   }, [fromDate, toDate, category, stockStatus])
 
   const setDatePreset = (days: number) => {
@@ -53,12 +47,7 @@ export function Dashboard({ theme, toggleTheme, onNewEntry, activeShopName }: Da
     setToDate(formatDateInput(end))
   }
 
-  const clearFilters = () => {
-    setFromDate('')
-    setToDate('')
-    setCategory('')
-    setStockStatus('all')
-  }
+  const clearFilters = () => { setFromDate(''); setToDate(''); setCategory(''); setStockStatus('all') }
 
   return (
     <>
@@ -66,8 +55,8 @@ export function Dashboard({ theme, toggleTheme, onNewEntry, activeShopName }: Da
       <div className="dashboard page-pad">
         <section className="dashboard-filters" aria-label="Dashboard filters">
           <div className="dashboard-filter-dates">
-            <label>From<input type="date" value={fromDate} max={toDate || formatDateInput(new Date())} onChange={(event) => setFromDate(event.target.value)} /></label>
-            <label>To<input type="date" value={toDate} min={fromDate || undefined} max={formatDateInput(new Date())} onChange={(event) => setToDate(event.target.value)} /></label>
+            <label>From<input type="date" value={fromDate} max={toDate || formatDateInput(new Date())} onChange={(e) => setFromDate(e.target.value)} /></label>
+            <label>To<input type="date" value={toDate} min={fromDate || undefined} max={formatDateInput(new Date())} onChange={(e) => setToDate(e.target.value)} /></label>
           </div>
           <div className="dashboard-filter-presets" aria-label="Date presets">
             <button type="button" onClick={() => setDatePreset(7)}>7 days</button>
@@ -75,13 +64,13 @@ export function Dashboard({ theme, toggleTheme, onNewEntry, activeShopName }: Da
             <button type="button" onClick={() => setDatePreset(90)}>90 days</button>
           </div>
           <label className="dashboard-filter-select">Category
-            <select value={category} onChange={(event) => setCategory(event.target.value)}>
+            <select value={category} onChange={(e) => setCategory(e.target.value)}>
               <option value="">All categories</option>
               {dashboard.categories.map((item) => <option key={item} value={item}>{item}</option>)}
             </select>
           </label>
           <label className="dashboard-filter-select">Stock
-            <select value={stockStatus} onChange={(event) => setStockStatus(event.target.value)}>
+            <select value={stockStatus} onChange={(e) => setStockStatus(e.target.value)}>
               <option value="all">All stock</option>
               <option value="available">In stock</option>
               <option value="low">Low stock</option>
@@ -90,7 +79,9 @@ export function Dashboard({ theme, toggleTheme, onNewEntry, activeShopName }: Da
           </label>
           <button className="dashboard-filter-reset" type="button" onClick={clearFilters}>Reset</button>
         </section>
+
         {error && <div style={{ color: '#ff6f00', padding: '8px', marginBottom: '12px', backgroundColor: '#fff3e0', borderRadius: '4px', fontSize: '14px' }}>{error}</div>}
+
         <section className="metric-grid">
           {dashboard.metrics.map((metric) => (
             <article className="metric-card" key={metric.label}>
@@ -101,6 +92,19 @@ export function Dashboard({ theme, toggleTheme, onNewEntry, activeShopName }: Da
             </article>
           ))}
         </section>
+
+        {processingEnabled && canViewProduction && (
+          <section className="panel" aria-label="Processing workspace" style={{ marginBottom: '1rem', padding: '1.25rem' }}>
+            <div className="panel-head">
+              <div><h2>Production &amp; processing</h2><p>Plan production, manage recipes, and track orders for this processing business.</p></div>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem' }}>
+              <button className="ghost-button" type="button" onClick={() => setPage?.('production-pipeline')}>
+                🏭 Open Production Pipeline
+              </button>
+            </div>
+          </section>
+        )}
 
         <section className="dashboard-main">
           <article className="panel sales-panel">

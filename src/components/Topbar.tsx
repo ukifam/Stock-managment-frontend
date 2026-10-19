@@ -1,8 +1,9 @@
 import { useEffect, useState, type KeyboardEvent } from 'react'
-import { api, type GlobalSearchResult } from '../api'
+import { ACTIVE_BRANCH_STORAGE_KEY, api, type GlobalSearchResult, type OrganizationBranch } from '../api'
 import { GLOBAL_SEARCH_NAVIGATION_EVENT } from '../types'
 import type { Theme } from '../types'
 import { useAuth } from '../context/AuthContext'
+import { NotificationsPopover } from './NotificationsPopover'
 
 type TopbarProps = {
   title?: string
@@ -24,6 +25,8 @@ export function Topbar({
   const [searchResults, setSearchResults] = useState<GlobalSearchResult[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
   const [searchError, setSearchError] = useState('')
+  const [branches, setBranches] = useState<OrganizationBranch[]>([])
+  const [activeBranchCode, setActiveBranchCode] = useState('')
   const normalizedQuery = searchValue.trim()
   const userInitials = String(user?.username || 'User')
     .trim()
@@ -60,6 +63,32 @@ export function Topbar({
       window.clearTimeout(timeout)
     }
   }, [normalizedQuery])
+
+  useEffect(() => {
+    if (!user || minimal) return
+
+    let isCurrent = true
+    api.organization()
+      .then((organization) => {
+        if (!isCurrent) return
+        const available = organization.branches.filter((branch) => branch.active)
+        const stored = localStorage.getItem(ACTIVE_BRANCH_STORAGE_KEY) || ''
+        const selected = available.find((branch) => branch.code === stored)
+          ? stored
+          : organization.activeBranchCode || available[0]?.code || ''
+        setBranches(available)
+        setActiveBranchCode(selected)
+        if (selected && selected !== stored) localStorage.setItem(ACTIVE_BRANCH_STORAGE_KEY, selected)
+      })
+      .catch(() => {
+        if (isCurrent) {
+          setBranches([])
+          setActiveBranchCode('')
+        }
+      })
+
+    return () => { isCurrent = false }
+  }, [minimal, user])
 
   const selectSearchResult = (result: GlobalSearchResult) => {
     window.dispatchEvent(new CustomEvent<GlobalSearchResult>(GLOBAL_SEARCH_NAVIGATION_EVENT, { detail: result }))
@@ -131,6 +160,21 @@ export function Topbar({
         </div>
       )}
       <div className="top-actions">
+        {!minimal && branches.length > 1 && (
+          <label className="branch-switcher">
+            <span>Branch</span>
+            <select
+              value={activeBranchCode}
+              onChange={(event) => {
+                localStorage.setItem(ACTIVE_BRANCH_STORAGE_KEY, event.target.value)
+                window.location.reload()
+              }}
+              aria-label="Active branch"
+            >
+              {branches.map((branch) => <option key={branch.code} value={branch.code}>{branch.name}</option>)}
+            </select>
+          </label>
+        )}
         <button type="button" className="theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
           {theme === 'dark' ? 'Light' : 'Dark'}
         </button>
@@ -139,7 +183,7 @@ export function Topbar({
             <button type="button" className="scan-button">
               Scan
             </button>
-            <button type="button" aria-label="Notifications" className="icon-button bell" />
+            <NotificationsPopover />
             <button type="button" aria-label="Help" className="icon-button help" />
             <button type="button" aria-label="Apps" className="icon-button apps" />
             <div className="operator" aria-label={`Signed in as ${user?.username || 'user'}`} title={user?.username || 'User'}>

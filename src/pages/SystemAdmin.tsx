@@ -1,7 +1,22 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { api, type AdminOverview, type AdminUser, type CreateAdminUserPayload } from '../api'
+import { api, type AdminOverview, type AdminUser, type CreateAdminBusinessPayload, type CreateAdminUserPayload } from '../api'
 import { Topbar } from '../components/Topbar'
 import type { PageDefinition, PageRenderProps } from '../types'
+
+const BUSINESS_TEMPLATES = [
+  { value: 'other', label: 'General / Other' },
+  { value: 'retail_shop', label: 'Retail shop' },
+  { value: 'electronics_store', label: 'Electronics store' },
+  { value: 'cafe', label: 'Café' },
+  { value: 'restaurant', label: 'Restaurant' },
+  { value: 'bakery', label: 'Bakery' },
+  { value: 'maize_mill', label: 'Maize mill' },
+  { value: 'juice_producer', label: 'Juice producer' },
+  { value: 'furniture_workshop', label: 'Furniture workshop' },
+  { value: 'soap_manufacturer', label: 'Soap manufacturer' },
+  { value: 'cosmetics', label: 'Cosmetics' },
+  { value: 'agro_processor', label: 'Agro processor' },
+]
 
 export const page: Pick<PageDefinition, 'id' | 'label' | 'icon'> = {
   id: 'system-admin',
@@ -9,7 +24,7 @@ export const page: Pick<PageDefinition, 'id' | 'label' | 'icon'> = {
   icon: 'gear',
 }
 
-export function SystemAdmin({ theme = 'dark', toggleTheme = () => undefined, page = 'system-admin', onOpenShop }: Partial<PageRenderProps>) {
+export function SystemAdmin({ theme = 'dark', toggleTheme = () => undefined, page = 'system-admin', setPage, activeShopOwnerKey, activeShopName, onOpenShop }: Partial<PageRenderProps>) {
   const [overview, setOverview] = useState<AdminOverview | null>(null)
   const [users, setUsers] = useState<AdminUser[]>([])
   const [search, setSearch] = useState('')
@@ -17,11 +32,21 @@ export function SystemAdmin({ theme = 'dark', toggleTheme = () => undefined, pag
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [isUserFormOpen, setIsUserFormOpen] = useState(false)
+  const [isBusinessFormOpen, setIsBusinessFormOpen] = useState(false)
   const [savingUser, setSavingUser] = useState(false)
+  const [savingBusiness, setSavingBusiness] = useState(false)
   const [updatingUserId, setUpdatingUserId] = useState('')
   const [userForm, setUserForm] = useState<CreateAdminUserPayload>({ username: '', email: '', password: '', role: 'staff', ownerKey: '' })
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null)
   const [editUserForm, setEditUserForm] = useState({ username: '', email: '', password: '', role: 'staff' as 'admin' | 'staff', ownerKey: '' })
+  const [businessForm, setBusinessForm] = useState<CreateAdminBusinessPayload>({
+    businessName: '',
+    username: '',
+    email: '',
+    password: '',
+    template: 'other',
+    processingEnabled: false,
+  })
 
   const loadOverview = async () => {
     try {
@@ -57,7 +82,7 @@ export function SystemAdmin({ theme = 'dark', toggleTheme = () => undefined, pag
   const viewCopy = {
     overview: ['Platform Overview', 'Monitor the health of every shop, account, and operational record.'],
     shops: ['Shops', 'Review the shops registered on the platform and their active account totals.'],
-    users: ['User Accounts', 'Review platform, shop administrator, and staff access.'],
+    users: ['User Management', 'Review and manage platform, shop administrator, and staff access.'],
     activity: ['Activity Log', 'Audit recent activity across every shop from one place.'],
   } as const
   const metricCards = [
@@ -70,6 +95,10 @@ export function SystemAdmin({ theme = 'dark', toggleTheme = () => undefined, pag
     { label: 'Open loans', value: metrics?.openLoans ?? 0, tone: 'violet' },
     { label: 'Open transfers', value: metrics?.openTransfers ?? 0, tone: 'teal' },
   ]
+
+  const openBusinessAdministration = (target: 'organization' | 'access-control') => {
+    setPage?.(activeShopOwnerKey ? target : 'system-admin-shops')
+  }
 
   const createUser = async (event: FormEvent) => {
     event.preventDefault()
@@ -88,6 +117,28 @@ export function SystemAdmin({ theme = 'dark', toggleTheme = () => undefined, pag
       setError(saveError instanceof Error ? saveError.message : 'Could not create the user account.')
     } finally {
       setSavingUser(false)
+    }
+  }
+
+  const createBusiness = async (event: FormEvent) => {
+    event.preventDefault()
+    setSavingBusiness(true)
+    try {
+      await api.createAdminBusiness(businessForm)
+      setBusinessForm({
+        businessName: '',
+        username: '',
+        email: '',
+        password: '',
+        template: 'other',
+        processingEnabled: false,
+      })
+      setIsBusinessFormOpen(false)
+      await loadOverview()
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Could not create the business.')
+    } finally {
+      setSavingBusiness(false)
     }
   }
 
@@ -155,18 +206,39 @@ export function SystemAdmin({ theme = 'dark', toggleTheme = () => undefined, pag
           ))}
         </section>}
 
+        {view === 'overview' && <section className="admin-business-tools" aria-label="Selected business administration">
+          <header className="admin-activity-heading">
+            <div>
+              <h2>{activeShopName || 'Business Administration'}</h2>
+              <p>{activeShopName ? 'Business administration' : 'Select a business to manage its organization and roles.'}</p>
+            </div>
+            {!activeShopName && <button type="button" className="admin-user-create" onClick={() => setPage?.('system-admin-shops')}>Browse shops</button>}
+          </header>
+          <div className="admin-business-tool-grid">
+            <button type="button" className="admin-business-tool" onClick={() => openBusinessAdministration('organization')}>
+              <strong>Organization</strong>
+            </button>
+            <button type="button" className="admin-business-tool" onClick={() => openBusinessAdministration('access-control')}>
+              <strong>Roles & Permissions</strong>
+            </button>
+            <button type="button" className="admin-business-tool" onClick={() => setPage?.('system-admin-users')}>
+              <strong>User Management</strong>
+            </button>
+          </div>
+        </section>}
+
         {view === 'shops' && <section className="admin-activity-section">
-          <header className="admin-activity-heading"><div><h2>Registered shops</h2><p>Each shop is owned by its shop administrator.</p></div></header>
+          <header className="admin-activity-heading"><div><h2>Registered businesses</h2><p>Create an organization or a business with production and processing enabled.</p></div><button type="button" className="admin-user-create" onClick={() => setIsBusinessFormOpen(true)}>Add business</button></header>
           <div className="admin-activity-table-wrap"><table className="admin-activity-table">
-            <thead><tr><th>Shop</th><th>Administrator email</th><th>Users</th><th>Status</th></tr></thead>
-            <tbody>{(overview?.shops || []).map((shop) => <tr key={shop.ownerKey} className="admin-shop-row" onClick={() => onOpenShop?.(shop.ownerKey, shop.name)}><td><button type="button" className="admin-shop-link">{shop.name}</button></td><td>{shop.email}</td><td>{shop.userCount}</td><td><span className={`admin-status ${shop.active ? 'positive' : 'neutral'}`}>{shop.active ? 'Active' : 'Inactive'}</span></td></tr>)}
-              {!loading && overview?.shops.length === 0 && <tr><td className="admin-empty" colSpan={4}>No shops found.</td></tr>}
+            <thead><tr><th>Business</th><th>Administrator email</th><th>Template</th><th>Processing</th><th>Users</th><th>Status</th></tr></thead>
+            <tbody>{(overview?.shops || []).map((shop) => <tr key={shop.ownerKey} className="admin-shop-row" onClick={() => onOpenShop?.(shop.ownerKey, shop.name)}><td><button type="button" className="admin-shop-link">{shop.name}</button></td><td>{shop.email}</td><td>{formatRole(shop.template)}</td><td><span className={`admin-status ${shop.processingEnabled ? 'positive' : 'neutral'}`}>{shop.processingEnabled ? 'Enabled' : 'Standard'}</span></td><td>{shop.userCount}</td><td><span className={`admin-status ${shop.active ? 'positive' : 'neutral'}`}>{shop.active ? 'Active' : 'Inactive'}</span></td></tr>)}
+              {!loading && overview?.shops.length === 0 && <tr><td className="admin-empty" colSpan={6}>No businesses found.</td></tr>}
             </tbody>
           </table></div>
         </section>}
 
         {view === 'users' && <section className="admin-activity-section">
-          <header className="admin-activity-heading"><div><h2>Platform users</h2><p>System administrators are kept separate from shop accounts.</p></div><button type="button" className="admin-user-create" onClick={() => setIsUserFormOpen(true)}>Add user</button></header>
+          <header className="admin-activity-heading"><div><h2>All users</h2><p>System administrators are kept separate from shop accounts.</p></div><button type="button" className="admin-user-create" onClick={() => setIsUserFormOpen(true)}>Add user</button></header>
           <div className="admin-activity-table-wrap"><table className="admin-activity-table">
             <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Shop</th><th>Status</th><th>Access</th></tr></thead>
             <tbody>{users.map((user) => <tr key={user.id}><td>{user.username}</td><td>{user.email}</td><td><span className="admin-type-label">{formatRole(user.role)}</span></td><td>{user.shopName}</td><td><span className={`admin-status ${user.active ? 'positive' : 'neutral'}`}>{user.active ? 'Active' : 'Inactive'}</span></td><td>{user.role === 'system_admin' ? <span className="admin-protected">Protected</span> : <div className="shop-user-actions"><button type="button" className="admin-user-action" onClick={() => openEditUser(user)}>Edit</button><button type="button" className="admin-user-action" disabled={updatingUserId === user.id} onClick={() => void toggleUserStatus(user)}>{updatingUserId === user.id ? 'Updating...' : user.active ? 'Deactivate' : 'Activate'}</button></div>}</td></tr>)}
@@ -223,6 +295,20 @@ export function SystemAdmin({ theme = 'dark', toggleTheme = () => undefined, pag
           </div>
         </section>}
       </div>
+      {isBusinessFormOpen && <div className="modal-backdrop" role="presentation">
+        <section className="entry-modal admin-user-modal" role="dialog" aria-modal="true" aria-labelledby="create-business-title">
+          <header className="detail-head"><div><h2 id="create-business-title">Add business</h2><p>Create the organization and its first shop-administrator account.</p></div><button type="button" className="modal-close" onClick={() => setIsBusinessFormOpen(false)} disabled={savingBusiness} aria-label="Close">x</button></header>
+          <form className="admin-user-form" onSubmit={createBusiness}>
+            <label className="admin-user-form-wide">Business name<input required value={businessForm.businessName} onChange={(event) => setBusinessForm((current) => ({ ...current, businessName: event.target.value }))} /></label>
+            <label>Industry template<select value={businessForm.template} onChange={(event) => setBusinessForm((current) => ({ ...current, template: event.target.value }))}>{BUSINESS_TEMPLATES.map((template) => <option key={template.value} value={template.value}>{template.label}</option>)}</select></label>
+            <label>Business setup<select value={businessForm.processingEnabled ? 'processing' : 'organization'} onChange={(event) => setBusinessForm((current) => ({ ...current, processingEnabled: event.target.value === 'processing' }))}><option value="organization">Organization</option><option value="processing">Processing business</option></select></label>
+            <label>Administrator name<input required value={businessForm.username} onChange={(event) => setBusinessForm((current) => ({ ...current, username: event.target.value }))} /></label>
+            <label>Administrator email<input required type="email" value={businessForm.email} onChange={(event) => setBusinessForm((current) => ({ ...current, email: event.target.value }))} /></label>
+            <label className="admin-user-form-wide">Temporary password<input required type="password" minLength={8} autoComplete="new-password" value={businessForm.password} onChange={(event) => setBusinessForm((current) => ({ ...current, password: event.target.value }))} /></label>
+            <footer><button type="button" onClick={() => setIsBusinessFormOpen(false)} disabled={savingBusiness}>Cancel</button><button type="submit" className="primary-action" disabled={savingBusiness}>{savingBusiness ? 'Creating...' : 'Create business'}</button></footer>
+          </form>
+        </section>
+      </div>}
       {isUserFormOpen && <div className="modal-backdrop" role="presentation">
         <section className="entry-modal admin-user-modal" role="dialog" aria-modal="true" aria-labelledby="create-user-title">
           <header className="detail-head"><div><h2 id="create-user-title">Add user account</h2><p>Create a shop administrator or assign staff to a shop.</p></div><button type="button" className="modal-close" onClick={() => setIsUserFormOpen(false)} disabled={savingUser} aria-label="Close">x</button></header>

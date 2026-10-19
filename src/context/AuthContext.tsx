@@ -1,12 +1,17 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { api } from '../api'
+import { api, type RolePermission } from '../api'
 
 export type AuthUser = {
   id: string
   username: string
   email: string
   role: string
+  shopRole?: string
   ownerKey?: string
+  accessRoleCode?: string
+  permissions?: RolePermission[]
+  branchCodes?: string[]
+  defaultBranchCode?: string
 }
 
 type AuthContextType = {
@@ -25,6 +30,7 @@ const TOKEN_STORAGE_KEY = 'tri_ltd_auth_token'
 const USER_STORAGE_KEY = 'tri_ltd_auth_user'
 const ACTIVE_SHOP_STORAGE_KEY = 'tri_system_admin_shop_owner_key'
 const ACTIVE_SHOP_NAME_STORAGE_KEY = 'tri_system_admin_shop_name'
+const ACTIVE_BRANCH_STORAGE_KEY = 'tri_active_branch_code'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_STORAGE_KEY))
@@ -69,28 +75,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (email: string, password: string) => {
     const res = await api.login(email, password)
+    localStorage.removeItem(ACTIVE_BRANCH_STORAGE_KEY)
+    const verifiedUser = await api.me(res.token)
     setToken(res.token)
-    setUser(res.user)
+    setUser(verifiedUser)
     localStorage.setItem(TOKEN_STORAGE_KEY, res.token)
-    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(res.user))
-    return res.user
+    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(verifiedUser))
+    return verifiedUser
   }
 
   const register = async (username: string, email: string, password: string) => {
     const res = await api.register(username, email, password)
+    localStorage.removeItem(ACTIVE_BRANCH_STORAGE_KEY)
+    const verifiedUser = await api.me(res.token)
     setToken(res.token)
-    setUser(res.user)
+    setUser(verifiedUser)
     localStorage.setItem(TOKEN_STORAGE_KEY, res.token)
-    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(res.user))
+    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(verifiedUser))
   }
 
   const logout = () => {
+    void api.logout().catch(() => undefined)
     setToken(null)
     setUser(null)
     localStorage.removeItem(TOKEN_STORAGE_KEY)
     localStorage.removeItem(USER_STORAGE_KEY)
     localStorage.removeItem(ACTIVE_SHOP_STORAGE_KEY)
     localStorage.removeItem(ACTIVE_SHOP_NAME_STORAGE_KEY)
+    localStorage.removeItem(ACTIVE_BRANCH_STORAGE_KEY)
   }
 
   return (

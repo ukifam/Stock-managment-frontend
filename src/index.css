@@ -1,6 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
 :root {
+  color-scheme: dark;
   --bg: #0b1220;
   --panel: #141d2e;
   --line: rgba(148, 163, 184, 0.14);
@@ -38,6 +39,7 @@ body {
   margin: 0;
   min-width: 320px;
   background: var(--bg);
+  color-scheme: dark;
 }
 
 button,
@@ -45,6 +47,14 @@ input,
 select,
 textarea {
   font: inherit;
+  color-scheme: dark;
+}
+
+select option,
+select optgroup {
+  color-scheme: dark;
+  background-color: #18181b !important;
+  color: #f4f4f5 !important;
 }
 
 button {

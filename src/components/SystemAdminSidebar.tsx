@@ -4,17 +4,24 @@ import { useAuth } from '../context/AuthContext'
 type SystemAdminSidebarProps = {
   page: Page
   setPage: (page: Page) => void
+  activeShopOwnerKey?: string
+  processingEnabled?: boolean
 }
 
 const PLATFORM_PAGES: Array<{ id: Page; label: string; icon: string }> = [
   { id: 'system-admin', label: 'Platform Overview', icon: 'grid' },
   { id: 'system-admin-shops', label: 'Shops', icon: 'box' },
-  { id: 'system-admin-users', label: 'User Accounts', icon: 'user' },
+  { id: 'system-admin-users', label: 'User Management', icon: 'user' },
   { id: 'system-admin-activity', label: 'Activity Log', icon: 'reports' },
 ]
 
-export function SystemAdminSidebar({ page, setPage }: SystemAdminSidebarProps) {
+export function SystemAdminSidebar({ page, setPage, activeShopOwnerKey, processingEnabled = false }: SystemAdminSidebarProps) {
   const { user, logout } = useAuth()
+  const SHOP_ADMIN_PAGES: Array<{ id: Page; label: string; icon: string }> = [
+    { id: 'organization', label: 'Organization', icon: 'gear' },
+    { id: 'quality-control', label: 'Quality Control', icon: 'box' },
+    { id: 'access-control', label: 'Roles & Permissions', icon: 'gear' },
+  ]
 
   return (
     <aside className="sidebar system-admin-sidebar">
@@ -34,6 +41,15 @@ export function SystemAdminSidebar({ page, setPage }: SystemAdminSidebarProps) {
             {item.label}
           </button>
         ))}
+        {activeShopOwnerKey && <>
+          <p className="system-admin-nav-label">Selected shop</p>
+          {SHOP_ADMIN_PAGES.filter((item) => item.id !== 'quality-control' || processingEnabled).map((item) => (
+            <button key={item.id} type="button" className={page === item.id ? 'active' : ''} onClick={() => setPage(item.id)}>
+              <span className={`nav-icon ${item.icon}`} aria-hidden="true" />
+              {item.label}
+            </button>
+          ))}
+        </>}
       </nav>
 
       <div className="sidebar-footer">

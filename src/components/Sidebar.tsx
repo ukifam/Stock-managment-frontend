@@ -7,6 +7,7 @@ type SidebarProps = {
   page: Page
   setPage: (page: Page) => void
   onNewEntry: () => void
+  processingEnabled?: boolean
 }
 
 type NavSubItem = {
@@ -30,9 +31,10 @@ const NAV_GROUPS: NavGroupConfig[] = [
     label: 'Inventory',
     iconClass: 'box',
     defaultPage: 'inventory',
-    pages: ['inventory', 'stock-movements', 'stock-adjustments'],
+    pages: ['inventory', 'inventory-control', 'stock-movements', 'stock-adjustments'],
     items: [
       { id: 'inventory', label: 'Products', icon: '📦' },
+      { id: 'inventory-control', label: 'Inventory Setup', icon: '🛠️' },
       { id: 'stock-movements', label: 'Movements', icon: '↕️' },
       { id: 'stock-adjustments', label: 'Adjustments', icon: '✏️' },
     ],
@@ -86,6 +88,16 @@ const NAV_GROUPS: NavGroupConfig[] = [
     ],
   },
   {
+    id: 'production-group',
+    label: 'Production',
+    iconClass: 'box',
+    defaultPage: 'production-pipeline',
+    pages: ['production-pipeline', 'production', 'production-objectives', 'production-recipes', 'production-processes', 'production-orders', 'production-procurement', 'production-resources', 'production-waste'],
+    items: [
+      { id: 'production-pipeline', label: 'Pipeline', icon: '🏭' },
+    ],
+  },
+  {
     id: 'transfers-group',
     label: 'Transfers',
     iconClass: 'cart',
@@ -95,9 +107,20 @@ const NAV_GROUPS: NavGroupConfig[] = [
       { id: 'transfers', label: 'Partner Transfers', icon: '🔁' },
     ],
   },
+  {
+    id: 'users-group',
+    label: 'User Management',
+    iconClass: 'gear',
+    defaultPage: 'shop-users',
+    pages: ['shop-users', 'access-control'],
+    items: [
+      { id: 'shop-users', label: 'Workers & Staff', icon: '👥' },
+      { id: 'access-control', label: 'Roles & Permissions', icon: '🛡️' },
+    ],
+  },
 ]
 
-export function Sidebar({ page, setPage, onNewEntry }: SidebarProps) {
+export function Sidebar({ page, setPage, onNewEntry, processingEnabled = false }: SidebarProps) {
   const { isAuthenticated, user, logout } = useAuth()
   // Track open state for each group
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
@@ -121,7 +144,7 @@ export function Sidebar({ page, setPage, onNewEntry }: SidebarProps) {
     setOpenGroups((prev) => {
       const willOpen = !prev[group.id]
       if (willOpen && !group.pages.includes(page)) {
-        setPage(group.defaultPage)
+        setPage(group.items.find((item) => canView(moduleForPage(item.id)))?.id || group.defaultPage)
       }
       return { ...prev, [group.id]: willOpen }
     })
@@ -130,9 +153,12 @@ export function Sidebar({ page, setPage, onNewEntry }: SidebarProps) {
   const dashPage = pageRegistry.find((p) => p.id === 'dashboard')
   const reportsPage = pageRegistry.find((p) => p.id === 'reports')
   const settingsPage = pageRegistry.find((p) => p.id === 'settings')
-  const isShopAdmin = String(user?.role || '').trim().toLowerCase() === 'admin'
-  const isStaff = String(user?.role || '').trim().toLowerCase() === 'staff'
-  const visibleGroups = NAV_GROUPS.filter((group) => !isStaff || ['inventory-group', 'sales-group', 'expenses-group', 'transfers-group'].includes(group.id))
+  const isShopAdmin = String(user?.role || '').trim().toLowerCase() === 'admin' || isSystemAdminRole(user?.role)
+  const canView = (module: string) => isShopAdmin || Boolean(user?.permissions?.find((permission) => permission.module === module)?.actions.includes('view'))
+  const visibleGroups = NAV_GROUPS.filter((group) => (
+    (group.id !== 'production-group' || processingEnabled)
+    && group.pages.some((item) => canView(moduleForPage(item)))
+  ))
 
   return (
     <aside className="sidebar">
@@ -146,7 +172,7 @@ export function Sidebar({ page, setPage, onNewEntry }: SidebarProps) {
 
       <nav className="nav">
         {/* Dashboard */}
-        {dashPage && (
+        {canView('dashboard') && dashPage && (
           <button
             key="dashboard"
             className={page === 'dashboard' ? 'active' : ''}
@@ -169,12 +195,10 @@ export function Sidebar({ page, setPage, onNewEntry }: SidebarProps) {
           </button>
         )}
 
-        {isShopAdmin && (
-          <button type="button" className={page === 'shop-users' ? 'active' : ''} onClick={() => setPage('shop-users')}>
-            <span className="nav-icon user" aria-hidden="true" />
-            User Management
-          </button>
-        )}
+        {processingEnabled && canView('quality') && <button type="button" className={page === 'quality-control' ? 'active' : ''} onClick={() => setPage('quality-control')}>
+          <span className="nav-icon box" aria-hidden="true" />
+          Quality Control
+        </button>}
 
         {/* 4 Accordion Groups: Inventory, Purchases, Sales, Expenses */}
         {visibleGroups.map((group) => {
@@ -196,7 +220,7 @@ export function Sidebar({ page, setPage, onNewEntry }: SidebarProps) {
               </button>
               {isOpen && (
                 <div className="nav-sub-group">
-                  {group.items.map((item) => (
+                  {group.items.filter((item) => canView(moduleForPage(item.id))).map((item) => (
                     <button
                       key={item.id}
                       className={`nav-sub-item ${page === item.id ? 'active' : ''}`}
@@ -214,7 +238,7 @@ export function Sidebar({ page, setPage, onNewEntry }: SidebarProps) {
         })}
 
         {/* Top-level Reports */}
-        {!isStaff && reportsPage && (
+        {canView('reports') && reportsPage && (
           <button
             key="reports"
             className={page === 'reports' ? 'active' : ''}
@@ -227,7 +251,7 @@ export function Sidebar({ page, setPage, onNewEntry }: SidebarProps) {
         )}
 
         {/* Top-level Settings */}
-        {!isStaff && settingsPage && (
+        {canView('settings') && settingsPage && (
           <button
             key="settings"
             className={page === 'settings' ? 'active' : ''}
@@ -269,9 +293,9 @@ export function Sidebar({ page, setPage, onNewEntry }: SidebarProps) {
         >
           <span>🏠</span> Home / Landing
         </button>
-        {!isStaff && <button className="new-entry" type="button" onClick={onNewEntry}>
+        {canView('purchases') || canView('sales') ? <button className="new-entry" type="button" onClick={onNewEntry}>
           <span aria-hidden="true">+</span> New Entry
-        </button>}
+        </button> : null}
       </div>
     </aside>
   )
@@ -279,4 +303,19 @@ export function Sidebar({ page, setPage, onNewEntry }: SidebarProps) {
 
 function isSystemAdminRole(role?: string) {
   return String(role || '').trim().toLowerCase().replace(/[\s-]+/g, '_') === 'system_admin'
+}
+
+function moduleForPage(page: Page) {
+  if (page === 'organization') return 'organization'
+  if (page === 'shop-users' || page === 'access-control') return 'users'
+  if (page === 'quality-control') return 'quality'
+  if (['inventory', 'inventory-control'].includes(page)) return 'inventory'
+  if (['stock-movements', 'stock-adjustments'].includes(page)) return 'stock_movements'
+  if (['purchases', 'purchase-items', 'purchases-report'].includes(page)) return 'purchases'
+  if (['sales', 'sale-items', 'sales-report'].includes(page)) return 'sales'
+  if (['expenses', 'expense-items', 'expenses-report'].includes(page)) return 'expenses'
+  if (['loans', 'loans-given', 'loans-taken', 'loans-repayments'].includes(page)) return 'loans'
+  if (['production', 'production-objectives', 'production-recipes', 'production-processes', 'production-orders', 'production-procurement', 'production-resources', 'production-waste', 'production-pipeline'].includes(page)) return 'production'
+  if (page === 'transfers') return 'transfers'
+  return 'dashboard'
 }

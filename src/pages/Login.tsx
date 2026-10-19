@@ -79,6 +79,7 @@ export function Login({ theme, toggleTheme, setPage }: LoginProps) {
           <div className="auth-field">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <label htmlFor="login-password">Password</label>
+              <button type="button" className="auth-link" onClick={() => setPage('forgot-password')}>Forgot password?</button>
             </div>
             <div className="input-wrap">
               <span className="input-icon">🔒</span>

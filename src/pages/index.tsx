@@ -1,20 +1,36 @@
-import { Dashboard, page as dashboardPage } from './Dashboard'
+import { Dashboard } from './Dashboard'
+import { dashboardPage } from './dashboardPage'
 import { Inventory, page as inventoryPage } from './Inventory'
+import { InventoryControl } from './InventoryControl'
+import { inventoryControlPage } from './inventoryControlPage'
 import { Purchases, page as purchasesPage } from './Purchases'
-import { Sales, page as salesPage } from './Sales'
+import { Sales } from './Sales'
 import { Expenses, page as expensesPage } from './Expenses'
 import { Loans, page as loansPage } from './Loans'
 import { Reports, page as reportsPage } from './Reports'
 import { Settings, page as settingsPage } from './Settings'
-import { StockMovements, page as stockMovementsPage } from './StockMovements'
+import { StockMovements } from './StockMovements'
+import { stockMovementsPage } from './stockMovementsPage'
 import { StockAdjustments, page as stockAdjustmentsPage } from './StockAdjustments'
+import { Production } from './Production'
+import { ProductionPipeline } from './ProductionPipeline'
+import { QualityControl } from './QualityControl'
+import { productionPage } from './productionPage'
 import { Transfers, page as transfersPage } from './Transfers'
 import { SystemAdmin, page as systemAdminPage } from './SystemAdmin'
-import { ShopUsers, page as shopUsersPage } from './ShopUsers'
+import { ShopUsers } from './ShopUsers'
+import { shopUsersPage } from './shopUsersPage'
+import { AccessControl } from './AccessControl'
+import { accessControlPage } from './accessControlPage'
+import { Organization } from './Organization'
+import { organizationPage } from './organizationPage'
 import { Landing } from './Landing'
 import { Login } from './Login'
 import { Register } from './Register'
+import { ForgotPassword } from './ForgotPassword'
 import type { PageDefinition } from '../types'
+
+const salesPage = { id: 'sales' as const, label: 'Sales', icon: 'tag' }
 
 export const pageRegistry: PageDefinition[] = [
   {
@@ -42,18 +58,42 @@ export const pageRegistry: PageDefinition[] = [
     ),
   },
   {
+    id: 'forgot-password',
+    label: 'Reset Password',
+    icon: 'lock',
+    render: ({ theme, toggleTheme, setPage }) => <ForgotPassword theme={theme} toggleTheme={toggleTheme} setPage={setPage} />,
+  },
+  {
     ...dashboardPage,
-    render: ({ theme, toggleTheme, openEntryModal, activeShopName }) => (
-      <Dashboard theme={theme} toggleTheme={toggleTheme} onNewEntry={() => openEntryModal()} activeShopName={activeShopName} />
+    render: ({ theme, toggleTheme, openEntryModal, activeShopName, processingEnabled, setPage }) => (
+      <Dashboard theme={theme} toggleTheme={toggleTheme} onNewEntry={() => openEntryModal()} activeShopName={activeShopName} processingEnabled={processingEnabled} setPage={setPage} />
     ),
   },
   {
     ...shopUsersPage,
-    render: ({ theme, toggleTheme }) => <ShopUsers theme={theme} toggleTheme={toggleTheme} />,
+    render: ({ theme, toggleTheme, setPage }) => <ShopUsers theme={theme} toggleTheme={toggleTheme} setPage={setPage} />,
+  },
+  {
+    ...accessControlPage,
+    render: ({ theme, toggleTheme, setPage }) => <AccessControl theme={theme} toggleTheme={toggleTheme} setPage={setPage} />,
+  },
+  {
+    ...organizationPage,
+    render: ({ theme, toggleTheme }) => <Organization theme={theme} toggleTheme={toggleTheme} />,
+  },
+  {
+    id: 'quality-control',
+    label: 'Quality Control',
+    icon: 'box',
+    render: ({ theme, toggleTheme }) => <QualityControl theme={theme} toggleTheme={toggleTheme} />,
   },
   {
     ...inventoryPage,
     render: (props) => <Inventory {...props} />,
+  },
+  {
+    ...inventoryControlPage,
+    render: ({ theme, toggleTheme, setPage }) => <InventoryControl theme={theme} toggleTheme={toggleTheme} setPage={setPage} />,
   },
   // Purchases Group
   {
@@ -338,6 +378,58 @@ export const pageRegistry: PageDefinition[] = [
     ),
   },
   {
+    ...productionPage,
+    render: (props) => <Production {...props} tab="planner" />,
+  },
+  {
+    id: 'production-objectives',
+    label: 'What Do I Need?',
+    icon: 'box',
+    render: (props) => <Production {...props} tab="objectives" />,
+  },
+  {
+    id: 'production-recipes',
+    label: 'Recipes & BOM',
+    icon: 'box',
+    render: (props) => <Production {...props} tab="recipes" />,
+  },
+  {
+    id: 'production-processes',
+    label: 'Production Processes',
+    icon: 'box',
+    render: (props) => <Production {...props} tab="processes" />,
+  },
+  {
+    id: 'production-orders',
+    label: 'Orders & Quality',
+    icon: 'box',
+    render: (props) => <Production {...props} tab="orders" />,
+  },
+  {
+    id: 'production-procurement',
+    label: 'Purchasing',
+    icon: 'box',
+    render: (props) => <Production {...props} tab="procurement" />,
+  },
+  {
+    id: 'production-resources',
+    label: 'Resources & Cost',
+    icon: 'box',
+    render: (props) => <Production {...props} tab="resources" />,
+  },
+  {
+    id: 'production-waste',
+    label: 'Waste & By-products',
+    icon: 'box',
+    render: (props) => <Production {...props} tab="waste" />,
+  },
+  {
+    id: 'production-pipeline',
+    label: 'Pipeline',
+    icon: 'box',
+    render: (props) => <ProductionPipeline theme={props.theme} toggleTheme={props.toggleTheme} currency={props.currency} />,
+  },
+  {
     ...transfersPage,
     render: (props) => <Transfers {...props} />,
   },
@@ -362,5 +454,23 @@ export const pageRegistry: PageDefinition[] = [
     label: 'Activity Log',
     icon: 'reports',
     render: (props) => <SystemAdmin {...props} />,
+  },
+  {
+    ...shopUsersPage,
+    render: (props) => <ShopUsers {...props} />,
+  },
+  {
+    ...accessControlPage,
+    render: (props) => <AccessControl {...props} />,
+  },
+  {
+    ...organizationPage,
+    render: (props) => <Organization {...props} />,
+  },
+  {
+    id: 'quality-control',
+    label: 'Quality Control',
+    icon: 'box',
+    render: (props) => <QualityControl {...props} />,
   },
 ]

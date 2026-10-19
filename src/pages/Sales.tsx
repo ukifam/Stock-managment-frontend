@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type React from 'react'
-import { api, type AvailableItem, type EntryStatus, type SaleRow, type SaleUpdatePayload } from '../api'
+import { api, type AvailableItem, type CreatePosSalePayload, type EntryStatus, type SaleReturnRow, type SaleRow, type SaleUpdatePayload } from '../api'
 import { Topbar } from '../components/Topbar'
 import { PaginationControls } from '../components/PaginationControls'
 import { ImportHelp } from '../components/ImportHelp'
@@ -9,7 +9,6 @@ import { useMemo } from 'react'
 import { Reports } from './Reports'
 import type { EntryMode, Page, ThemePageProps } from '../types'
 
-export const page = { id: 'sales' as const, label: 'Sales', icon: 'tag' }
 import { exportRows } from '../utils/export'
 import { formatMoney } from '../utils/money'
 
@@ -83,6 +82,18 @@ export function Sales({
   const [scannedItems, setScannedItems] = useState<ScannedItem[]>([])
   const [importError, setImportError] = useState('')
   const [isImporting, setIsImporting] = useState(false)
+  const [customerName, setCustomerName] = useState('')
+  const [customerPhone, setCustomerPhone] = useState('')
+  const [discount, setDiscount] = useState('0')
+  const [taxRate, setTaxRate] = useState('0')
+  const [paymentMethod, setPaymentMethod] = useState<CreatePosSalePayload['payment']>('Cash')
+  const [paidAmount, setPaidAmount] = useState('0')
+  const [isSubmittingSale, setIsSubmittingSale] = useState(false)
+  const [receipt, setReceipt] = useState<SaleRow | null>(null)
+  const [saleReturns, setSaleReturns] = useState<SaleReturnRow[]>([])
+  const [returnReason, setReturnReason] = useState('')
+  const [returnSku, setReturnSku] = useState('')
+  const [returnQuantity, setReturnQuantity] = useState('1')
   const importInputRef = useRef<HTMLInputElement>(null)
   const isManual = entryMode === 'manual'
 
@@ -101,11 +112,18 @@ export function Sales({
   }, [appliedFilterFrom, appliedFilterTo, pageNumber, pageSize, listRevision])
 
   const selectedSale = rows.find((row) => row.id === selectedId) ?? rows[0]
+  const selectedSaleId = selectedSale?.id ?? ''
 
   useEffect(() => {
-    setSaleForm(saleFormFromRow(selectedSale))
-    setIsEditingSale(false)
-  }, [selectedSale?.id])
+    if (!selectedSaleId) return
+    let isMounted = true
+    api.listSaleReturns(selectedSaleId)
+      .then((returns) => { if (isMounted) setSaleReturns(returns) })
+      .catch((loadError) => {
+        if (isMounted) setError(loadError instanceof Error ? loadError.message : 'Could not load sale returns.')
+      })
+    return () => { isMounted = false }
+  }, [selectedSaleId])
 
   useEffect(() => {
     if (isSelling && isManual) {
@@ -158,6 +176,9 @@ export function Sales({
   }
 
   const scanTotal = scannedItems.reduce((sum, item) => sum + item.quantity * item.price, 0)
+  const checkoutSubtotal = isManual ? (selectedItem?.price ?? 0) * quantity : scanTotal
+  const checkoutDiscount = Math.max(0, Number(discount) || 0)
+  const checkoutTax = Math.max(0, checkoutSubtotal - checkoutDiscount) * Math.max(0, Number(taxRate) || 0) / 100
   const filteredSalesTotal = rows.reduce((sum, row) => sum + Number(row.rawValue ?? row.value ?? 0), 0)
   const filteredItemsSold = rows.reduce((sum, row) => sum + Number(row.rawQuantity ?? row.items ?? 0), 0)
 
@@ -267,11 +288,87 @@ export function Sales({
     setSaleForm((current) => ({ ...current, [field]: value }))
   }
 
-  const toggleSaleEditing = () => {
-    if (isEditingSale) {
-      setSaleForm(saleFormFromRow(selectedSale))
+  const handleCheckout = async () => {
+    const items = isManual
+      ? selectedItem ? [{ sku: selectedItem.sku, item: selectedItem.item, category: selectedItem.category, quantity, unitPrice: selectedItem.price }] : []
+      : scannedItems.map((item) => ({ sku: item.sku, item: item.item, quantity: item.quantity, unitPrice: item.price }))
+    if (!items.length || items.some((item) => item.quantity <= 0)) {
+      setError('Add at least one product with a quantity greater than zero.')
+      return
     }
+    if (checkoutDiscount > checkoutSubtotal) {
+      setError('Discount cannot exceed the sale subtotal.')
+      return
+    }
+    if (paymentMethod === 'Credit' && !customerName.trim()) {
+      setError('Enter a customer name for a credit sale.')
+      return
+    }
+    try {
+      setIsSubmittingSale(true)
+      setError('')
+      const saved = await api.createPosSale({
+        customer: customerName.trim() || 'Walk-in Customer',
+        phone: customerPhone.trim(),
+        items,
+        discount: checkoutDiscount,
+        tax: checkoutTax,
+        payment: paymentMethod,
+        ...(paymentMethod === 'Credit' ? { paidAmount: Number(paidAmount) || 0 } : {}),
+      })
+      setReceipt(saved)
+      setScannedItems([])
+      setSelectedItem(null)
+      setQuantity(1)
+      setDiscount('0')
+      setTaxRate('0')
+      setPaidAmount('0')
+      setListRevision((revision) => revision + 1)
+      setIsSelling(false)
+    } catch (checkoutError) {
+      setError(checkoutError instanceof Error ? checkoutError.message : 'Could not complete the sale.')
+    } finally {
+      setIsSubmittingSale(false)
+    }
+  }
+
+  const toggleSaleEditing = () => {
+    setSaleForm(saleFormFromRow(selectedSale))
     setIsEditingSale((current) => !current)
+  }
+
+  const handleCreateReturn = async () => {
+    if (!selectedSale) return
+    const item = selectedSale.lineItems?.find((line) => line.sku === returnSku) || selectedSale.lineItems?.[0]
+    if (!item) {
+      setError('This legacy sale has no item-level return information.')
+      return
+    }
+    try {
+      const created = await api.createSaleReturn(selectedSale.id, {
+        reason: returnReason,
+        items: [{ sku: item.sku || '', item: item.item, quantity: Number(returnQuantity) }],
+      })
+      setSaleReturns((current) => [created, ...current])
+      setReturnReason('')
+      setReturnQuantity('1')
+      setError('')
+    } catch (returnError) {
+      setError(returnError instanceof Error ? returnError.message : 'Could not submit return request.')
+    }
+  }
+
+  const handleReturnDisposition = async (returnId: string, approve: boolean) => {
+    try {
+      const updated = approve
+        ? await api.approveSaleReturn(returnId)
+        : await api.rejectSaleReturn(returnId)
+      setSaleReturns((current) => current.map((row) => row.id === returnId ? updated : row))
+      setListRevision((revision) => revision + (approve ? 1 : 0))
+      setError('')
+    } catch (returnError) {
+      setError(returnError instanceof Error ? returnError.message : 'Could not update return request.')
+    }
   }
 
   const currentTab: 'all' | 'items' | 'report' =
@@ -440,7 +537,7 @@ export function Sales({
             <SaleDetailPanel
               row={selectedSale}
               isEditing={isEditingSale}
-              form={saleForm}
+              form={isEditingSale ? saleForm : saleFormFromRow(selectedSale)}
               onEditToggle={toggleSaleEditing}
               onFieldChange={handleSaleFormChange}
               onSave={async () => {
@@ -449,9 +546,19 @@ export function Sales({
                 }
               }}
               onDelete={() => selectedSale && handleDeleteSale(selectedSale.id)}
+              returns={saleReturns.filter((saleReturn) => saleReturn.saleId === selectedSale?.id)}
+              returnReason={returnReason}
+              returnSku={returnSku}
+              returnQuantity={returnQuantity}
+              onReturnReasonChange={setReturnReason}
+              onReturnSkuChange={setReturnSku}
+              onReturnQuantityChange={setReturnQuantity}
+              onCreateReturn={handleCreateReturn}
+              onReturnDisposition={handleReturnDisposition}
             />
           </div>
         )}
+        {receipt && <ReceiptModal sale={receipt} currency={currency} onClose={() => setReceipt(null)} />}
       </>
     )
   }
@@ -461,9 +568,9 @@ export function Sales({
       <Topbar placeholder="Search orders, serials..." theme={theme} toggleTheme={toggleTheme} />
       <div className="sales-page">
         <section className="cart-panel page-pad">
-          <div className="cart-head"><div><span>{isManual ? 'Manual Sale' : 'Active Cart'}</span><p>Transaction ID: TXN-90210-A</p></div><div className="toolbar"><button type="button" onClick={() => setIsSelling(false)}>Back to Table</button>{!isManual && <button className="primary-action" type="button">Smart Scan</button>}</div></div>
-          <div className="cart-list">{rows.slice(0, 3).map((item) => <article className="cart-item" key={item.id}><div className="cart-visual keyboard" /><div><strong>{item.item}</strong><span>Order: {item.id}</span><div className="qty"><button type="button">-</button><b>{item.items}</b><button type="button">+</button></div></div><b>{item.value}</b><button type="button" aria-label="Remove item">x</button></article>)}</div>
-          <div className="items-count"><span>Items Count</span><b>4 Units</b></div>
+          <div className="cart-head"><div><span>{isManual ? 'Manual Sale' : 'Active Cart'}</span><p>{scannedItems.length} distinct item(s) in cart</p></div><div className="toolbar"><button type="button" onClick={() => setIsSelling(false)}>Back to Table</button>{!isManual && <button className="primary-action" type="button">Smart Scan</button>}</div></div>
+          <div className="cart-list">{isManual ? selectedItem ? <article className="cart-item"><div className="cart-visual keyboard" /><div><strong>{selectedItem.item}</strong><span>SKU: {selectedItem.sku}</span><div className="qty"><b>{quantity}</b></div></div><b>{formatMoney(checkoutSubtotal, currency)}</b></article> : <p>Select an item to begin.</p> : scannedItems.map((item) => <article className="cart-item" key={item.sku}><div className="cart-visual keyboard" /><div><strong>{item.item}</strong><span>SKU: {item.sku}</span><div className="qty"><button type="button" onClick={() => handleScannedQuantityChange(item.sku, item.quantity - 1)}>-</button><b>{item.quantity}</b><button type="button" onClick={() => handleScannedQuantityChange(item.sku, item.quantity + 1)}>+</button></div></div><b>{formatMoney(item.quantity * item.price, currency)}</b><button type="button" aria-label={`Remove ${item.item}`} onClick={() => handleRemoveScannedItem(item.sku)}>x</button></article>)}</div>
+          <div className="items-count"><span>Items Count</span><b>{isManual ? (selectedItem ? quantity : 0) : scannedItems.reduce((sum, item) => sum + item.quantity, 0)} units</b></div>
         </section>
         <aside className="checkout-panel">
           <h2>Customer & Payment</h2>
@@ -572,16 +679,27 @@ export function Sales({
               )}
             </>
           )}
-          <label>Customer Name<input defaultValue="Alexander Sterling" /></label>
-          <label>Phone Number<input defaultValue="+1 (555) 892-4410" /></label>
-          <div className="summary-box"><h3>Order Summary</h3><p><span>Subtotal</span><b>{formatMoney(isManual ? (selectedItem?.price ?? 0) * quantity : scanTotal, currency)}</b></p><p><span>Estimated Tax (8.5%)</span><b>{formatMoney((isManual ? (selectedItem?.price ?? 0) * quantity : scanTotal) * 0.085, currency)}</b></p><p><span>Total</span><b>{formatMoney((isManual ? (selectedItem?.price ?? 0) * quantity : scanTotal) * 1.085, currency)}</b></p></div>
-          <div className="payment-grid"><button className="selected" type="button">Credit</button><button type="button">Cash</button><button type="button">Crypto</button></div>
-          <button className="checkout-button" type="button" disabled={isManual && (!selectedItem || quantity <= 0)}>Complete Sale & Print</button>
-          <div className="checkout-links"><span>Save as Draft</span><span>Void Transaction</span></div>
+          <label>Customer Name<input value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder="Walk-in Customer" /></label>
+          <label>Phone Number<input value={customerPhone} onChange={(event) => setCustomerPhone(event.target.value)} placeholder="Optional" /></label>
+          <label>Discount ({currency})<input type="number" min="0" step="0.01" value={discount} onChange={(event) => setDiscount(event.target.value)} /></label>
+          <label>Tax rate (%)<input type="number" min="0" step="0.01" value={taxRate} onChange={(event) => setTaxRate(event.target.value)} /></label>
+          {paymentMethod === 'Credit' && <label>Payment received now ({currency})<input type="number" min="0" step="0.01" value={paidAmount} onChange={(event) => setPaidAmount(event.target.value)} /></label>}
+          <div className="summary-box"><h3>Order Summary</h3><p><span>Subtotal</span><b>{formatMoney(checkoutSubtotal, currency)}</b></p><p><span>Discount</span><b>-{formatMoney(checkoutDiscount, currency)}</b></p><p><span>Tax ({Math.max(0, Number(taxRate) || 0)}%)</span><b>{formatMoney(checkoutTax, currency)}</b></p><p><span>Total</span><b>{formatMoney(Math.max(0, checkoutSubtotal - checkoutDiscount + checkoutTax), currency)}</b></p></div>
+          <div className="payment-grid">{(['Cash', 'Card', 'Mobile Money', 'Credit'] as const).map((method) => <button className={paymentMethod === method ? 'selected' : ''} type="button" key={method} onClick={() => setPaymentMethod(method)}>{method}</button>)}</div>
+          <button className="checkout-button" type="button" onClick={() => void handleCheckout()} disabled={isSubmittingSale || (isManual && (!selectedItem || quantity <= 0)) || (!isManual && scannedItems.length === 0)}>{isSubmittingSale ? 'Completing sale...' : 'Complete Sale & Print'}</button>
+          <div className="checkout-links"><span>Sale commits to inventory when completed.</span></div>
         </aside>
       </div>
+      {receipt && <ReceiptModal sale={receipt} currency={currency} onClose={() => setReceipt(null)} />}
     </>
   )
+}
+
+function ReceiptModal({ sale, currency, onClose }: { sale: SaleRow; currency: string; onClose: () => void }) {
+  const subtotal = Number(sale.subtotal || sale.rawValue || 0)
+  const discountAmount = Number(sale.discount || 0)
+  const taxAmount = Number(sale.tax || 0)
+  return <div className="modal-backdrop" role="presentation"><style>{'@media print { body * { visibility: hidden !important; } .sale-receipt-print, .sale-receipt-print * { visibility: visible !important; } .sale-receipt-print { position: fixed; inset: 0; width: 100%; border: 0; box-shadow: none; } .receipt-actions { display: none !important; } }'}</style><section className="entry-modal sale-receipt-print"><h2>{sale.payment === 'Credit' ? 'Invoice' : 'Sales receipt'}</h2><p>Sale: {sale.id}</p><p>Date: {sale.date}</p><p>Customer: {sale.customer}</p>{sale.phone && <p>Phone: {sale.phone}</p>}<div className="table-frame"><table><thead><tr><th>Item</th><th>Qty</th><th>Unit price</th><th>Total</th></tr></thead><tbody>{(sale.lineItems || []).map((item, index) => <tr key={`${item.sku || item.item}-${index}`}><td>{item.item}</td><td>{item.quantity}</td><td>{formatMoney(item.unitPrice, currency)}</td><td>{formatMoney(item.total, currency)}</td></tr>)}</tbody></table></div><p>Subtotal: {formatMoney(subtotal, currency)}</p><p>Discount: {formatMoney(discountAmount, currency)}</p><p>Tax: {formatMoney(taxAmount, currency)}</p><h3>Total: {formatMoney(Number(sale.rawValue ?? sale.value), currency)}</h3><p>Payment: {sale.payment}</p><p>Paid: {formatMoney(Number(sale.paidAmount ?? sale.rawPaidAmount ?? sale.rawValue ?? sale.value), currency)}</p><p>Outstanding: {formatMoney(Number(sale.outstanding ?? sale.rawOutstanding ?? 0), currency)}</p><div className="modal-actions receipt-actions"><button type="button" onClick={onClose}>Close</button><button className="primary-action" type="button" onClick={() => window.print()}>Print receipt / invoice</button></div></section></div>
 }
 
 function SaleDetailPanel({
@@ -592,6 +710,15 @@ function SaleDetailPanel({
   onFieldChange,
   onSave,
   onDelete,
+  returns,
+  returnReason,
+  returnSku,
+  returnQuantity,
+  onReturnReasonChange,
+  onReturnSkuChange,
+  onReturnQuantityChange,
+  onCreateReturn,
+  onReturnDisposition,
 }: {
   row?: SaleRow
   isEditing: boolean
@@ -600,6 +727,15 @@ function SaleDetailPanel({
   onFieldChange: (field: keyof SaleUpdatePayload, value: string) => void
   onSave: () => Promise<void>
   onDelete?: () => void
+  returns: SaleReturnRow[]
+  returnReason: string
+  returnSku: string
+  returnQuantity: string
+  onReturnReasonChange: (value: string) => void
+  onReturnSkuChange: (value: string) => void
+  onReturnQuantityChange: (value: string) => void
+  onCreateReturn: () => Promise<void>
+  onReturnDisposition: (id: string, approve: boolean) => Promise<void>
 }) {
   return (
     <aside className="detail-panel transaction-detail">
@@ -715,6 +851,45 @@ function SaleDetailPanel({
               <div><dt>Status</dt><dd>{row?.status ?? '-'}</dd></div>
               <div><dt>Date</dt><dd>{row?.date ?? '-'}</dd></div>
             </dl>
+          </section>
+          <section>
+            <h3>Returns</h3>
+            {returns.map((saleReturn) => (
+              <div className="line-item-row" key={saleReturn.id}>
+                <div className="line-item-main">
+                  <strong>{saleReturn.status} · {saleReturn.id}</strong>
+                  <span>{saleReturn.reason}</span>
+                  <span>{saleReturn.items.map((item) => `${item.item} × ${item.quantity}`).join(', ')}</span>
+                </div>
+                {saleReturn.status === 'Pending' && (
+                  <div className="line-item-calc">
+                    <button type="button" onClick={() => void onReturnDisposition(saleReturn.id, true)}>Approve & restock</button>
+                    <button type="button" onClick={() => void onReturnDisposition(saleReturn.id, false)}>Reject</button>
+                  </div>
+                )}
+              </div>
+            ))}
+            {row?.lineItems?.length ? (
+              <div className="field-grid">
+                <label>
+                  Product
+                  <select value={returnSku || row.lineItems[0].sku || ''} onChange={(event) => onReturnSkuChange(event.target.value)}>
+                    {row.lineItems.map((item, index) => (
+                      <option key={`${item.sku}-${index}`} value={item.sku || ''}>{item.item} ({item.quantity} sold)</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Return quantity
+                  <input type="number" min="0.01" step="any" value={returnQuantity} onChange={(event) => onReturnQuantityChange(event.target.value)} />
+                </label>
+                <label>
+                  Reason
+                  <input value={returnReason} onChange={(event) => onReturnReasonChange(event.target.value)} required />
+                </label>
+                <button type="button" disabled={!returnReason.trim()} onClick={() => void onCreateReturn()}>Request return</button>
+              </div>
+            ) : <p>Item-level return is unavailable for this legacy sale.</p>}
           </section>
         </>
       )}
@@ -917,5 +1092,3 @@ function SaleItemsView({
     </div>
   )
 }
-
-

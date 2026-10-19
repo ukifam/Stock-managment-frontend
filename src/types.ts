@@ -2,11 +2,25 @@ export type Page =
   | 'landing'
   | 'login'
   | 'register'
+  | 'forgot-password'
   | 'dashboard'
   | 'shop-users'
+  | 'access-control'
+  | 'organization'
   | 'inventory'
+  | 'inventory-control'
   | 'stock-movements'
   | 'stock-adjustments'
+  | 'production'
+  | 'production-objectives'
+  | 'production-recipes'
+  | 'production-processes'
+  | 'production-orders'
+  | 'production-procurement'
+  | 'production-resources'
+  | 'production-waste'
+  | 'production-pipeline'
+  | 'quality-control'
   | 'purchases'
   | 'purchase-items'
   | 'purchases-report'
@@ -52,7 +66,9 @@ export type PageRenderProps = ThemePageProps & {
   listRefreshId: number
   reportScope: ReportScope
   setReportScope: (scope: ReportScope) => void
+  activeShopOwnerKey: string
   activeShopName: string
+  processingEnabled: boolean
   onOpenShop: (ownerKey: string, shopName: string) => void
 }
 

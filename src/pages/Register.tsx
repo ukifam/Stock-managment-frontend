@@ -33,8 +33,8 @@ export function Register({ theme, toggleTheme, setPage }: RegisterProps) {
       return
     }
 
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters.')
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters.')
       return
     }
 
@@ -109,7 +109,7 @@ export function Register({ theme, toggleTheme, setPage }: RegisterProps) {
           </div>
 
           <div className="auth-field">
-            <label htmlFor="reg-password">Password (min. 6 characters)</label>
+            <label htmlFor="reg-password">Password (min. 8 characters)</label>
             <div className="input-wrap">
               <span className="input-icon">🔒</span>
               <input
@@ -119,6 +119,7 @@ export function Register({ theme, toggleTheme, setPage }: RegisterProps) {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="new-password"
+                minLength={8}
                 required
               />
               <button

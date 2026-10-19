@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type StockMovementRow } from '../api'
 import { exportRows } from '../utils/export'
-import type { PageDefinition, PageRenderProps } from '../types'
+import type { PageRenderProps } from '../types'
 
 export function StockMovements({ setPage }: Partial<PageRenderProps>) {
   const [movements, setMovements] = useState<StockMovementRow[]>([])
@@ -29,8 +29,11 @@ export function StockMovements({ setPage }: Partial<PageRenderProps>) {
   }
 
   useEffect(() => {
-    setPageNum(1)
-    loadMovements(1, searchFilter, typeFilter)
+    const timer = window.setTimeout(() => {
+      setPageNum(1)
+      void loadMovements(1, searchFilter, typeFilter)
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [searchFilter, typeFilter])
 
   const handleExport = () => {
@@ -43,6 +46,13 @@ export function StockMovements({ setPage }: Partial<PageRenderProps>) {
         Item: m.item || '-',
         SKU: m.sku,
         QuantityChange: String(m.quantity),
+        OriginalQuantity: `${m.originalQuantity ?? Math.abs(m.quantity)} ${m.originalUnit || ''}`.trim(),
+        ConvertedQuantity: `${m.convertedQuantity ?? Math.abs(m.quantity)} ${m.convertedUnit || ''}`.trim(),
+        Warehouse: m.warehouseCode || '',
+        FromWarehouse: m.fromWarehouseCode || '',
+        ToWarehouse: m.toWarehouseCode || '',
+        BatchNumber: m.batchNumber || '',
+        ExpiryDate: m.expiryDate || '',
         PreviousStock: String(m.previousStock),
         NewStock: String(m.newStock),
         Reason: m.reason || '',
@@ -74,6 +84,10 @@ export function StockMovements({ setPage }: Partial<PageRenderProps>) {
         return { background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', border: '1px solid rgba(34, 197, 94, 0.3)' }
       case 'SHOWCASE_SALE':
         return { background: 'rgba(20, 184, 166, 0.15)', color: '#2dd4bf', border: '1px solid rgba(20, 184, 166, 0.3)' }
+      case 'PRODUCTION_CONSUMPTION':
+        return { background: 'rgba(249, 115, 22, 0.15)', color: '#fdba74', border: '1px solid rgba(249, 115, 22, 0.3)' }
+      case 'PRODUCTION_OUTPUT':
+        return { background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', border: '1px solid rgba(34, 197, 94, 0.3)' }
       default:
         return { background: 'rgba(148, 163, 184, 0.15)', color: '#94a3b8', border: '1px solid rgba(148, 163, 184, 0.3)' }
     }
@@ -194,6 +208,13 @@ export function StockMovements({ setPage }: Partial<PageRenderProps>) {
             <option value="SHOWCASE_OUT">Sent to Showcase</option>
             <option value="SHOWCASE_RETURN">Showcase Return</option>
             <option value="SHOWCASE_SALE">Showcase Sale</option>
+            <option value="PRODUCTION_CONSUMPTION">Production Consumption</option>
+            <option value="PRODUCTION_OUTPUT">Production Output</option>
+            <option value="TRANSFER_IN">Warehouse Transfer In</option>
+            <option value="TRANSFER_OUT">Warehouse Transfer Out</option>
+            <option value="WASTE">Waste</option>
+            <option value="EXPIRY">Expired Stock</option>
+            <option value="QUARANTINE">Quarantine</option>
             <option value="SUPPLIER_RETURN">Supplier Return</option>
             <option value="ADJUSTMENT">General Adjustment</option>
           </select>
@@ -217,6 +238,7 @@ export function StockMovements({ setPage }: Partial<PageRenderProps>) {
                 <th style={{ padding: '0.9rem 1rem', color: 'var(--text-muted, #64748b)', fontWeight: 600 }}>Movement Type</th>
                 <th style={{ padding: '0.9rem 1rem', color: 'var(--text-muted, #64748b)', fontWeight: 600 }}>Product / SKU</th>
                 <th style={{ padding: '0.9rem 1rem', color: 'var(--text-muted, #64748b)', fontWeight: 600, textAlign: 'right' }}>Qty Change</th>
+                <th style={{ padding: '0.9rem 1rem', color: 'var(--text-muted, #64748b)', fontWeight: 600 }}>Units</th>
                 <th style={{ padding: '0.9rem 1rem', color: 'var(--text-muted, #64748b)', fontWeight: 600, textAlign: 'center' }}>Before → After</th>
                 <th style={{ padding: '0.9rem 1rem', color: 'var(--text-muted, #64748b)', fontWeight: 600 }}>Reason / Details</th>
                 <th style={{ padding: '0.9rem 1rem', color: 'var(--text-muted, #64748b)', fontWeight: 600 }}>Ref</th>
@@ -224,11 +246,11 @@ export function StockMovements({ setPage }: Partial<PageRenderProps>) {
               </tr>
             </thead>
             <tbody>
-              {movements.map((m) => {
+              {movements.map((m, index) => {
                 const isPositive = Number(m.quantity) > 0
                 return (
                   <tr
-                    key={m._id || m.id || Math.random().toString()}
+                    key={m._id || m.id || `${m.date}-${m.sku}-${m.type}-${index}`}
                     style={{
                       borderBottom: '1px solid var(--line, rgba(148, 163, 184, 0.08))',
                       transition: 'background 0.15s',
@@ -273,6 +295,10 @@ export function StockMovements({ setPage }: Partial<PageRenderProps>) {
                         ? `Sold ${m.showcaseQuantity || 0}`
                         : isPositive ? `+${m.quantity}` : m.quantity}
                     </td>
+                    <td style={{ padding: '0.9rem 1rem', color: 'var(--text-soft, #94a3b8)', whiteSpace: 'nowrap' }}>
+                      <div>{m.originalQuantity ?? Math.abs(m.quantity)} {m.originalUnit || 'unit'}</div>
+                      <div style={{ marginTop: '3px', color: 'var(--text-muted, #64748b)', fontSize: '0.75rem' }}>{m.convertedQuantity ?? Math.abs(m.quantity)} {m.convertedUnit || 'base'}{m.warehouseCode ? ` · ${m.warehouseCode}` : ''}</div>
+                    </td>
                     <td style={{ padding: '0.9rem 1rem', textAlign: 'center', whiteSpace: 'nowrap', color: 'var(--text-soft, #94a3b8)', fontFamily: 'var(--mono)' }}>
                       <span>{m.previousStock}</span>
                       <span style={{ margin: '0 0.4rem', color: 'var(--text-muted, #64748b)' }}>→</span>
@@ -293,7 +319,7 @@ export function StockMovements({ setPage }: Partial<PageRenderProps>) {
 
               {loading && (
                 <tr>
-                  <td colSpan={8} style={{ padding: '2.5rem', textAlign: 'center', color: 'var(--text-muted, #64748b)' }}>
+                  <td colSpan={9} style={{ padding: '2.5rem', textAlign: 'center', color: 'var(--text-muted, #64748b)' }}>
                     ⏳ Loading movements ledger...
                   </td>
                 </tr>
@@ -301,7 +327,7 @@ export function StockMovements({ setPage }: Partial<PageRenderProps>) {
 
               {!loading && movements.length === 0 && (
                 <tr>
-                  <td colSpan={8} style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted, #64748b)' }}>
+                  <td colSpan={9} style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted, #64748b)' }}>
                     No stock movements found matching your filter criteria.
                   </td>
                 </tr>
@@ -336,10 +362,4 @@ export function StockMovements({ setPage }: Partial<PageRenderProps>) {
       </div>
     </div>
   )
-}
-
-export const page: Pick<PageDefinition, 'id' | 'label' | 'icon'> = {
-  id: 'stock-movements',
-  label: 'Movements',
-  icon: 'Activity',
 }
