@@ -12,20 +12,18 @@ export function Landing({ theme, toggleTheme, setPage }: LandingProps) {
 
   return (
     <div className={`landing-root ${theme}`}>
-      {/* Navigation Header */}
       <header className="landing-nav">
-        <div className="landing-brand" onClick={() => setPage('landing')} style={{ cursor: 'pointer' }}>
-          <div className="landing-logo-icon">▲</div>
+        <button type="button" className="landing-brand" onClick={() => setPage('landing')}>
+          <div className="landing-logo-icon">T</div>
           <div className="landing-brand-text">
             <strong>TRI LTD</strong>
-            <span>Business Suite</span>
+            <span>Stock &amp; business management</span>
           </div>
-        </div>
+        </button>
 
         <nav className="landing-nav-links">
-          <a href="#features">Features</a>
-          <a href="#solutions">Modules</a>
-          <a href="#metrics">Performance</a>
+          <a href="#features">What you can do</a>
+          <a href="#overview">Overview</a>
         </nav>
 
         <div className="landing-nav-actions">
@@ -33,20 +31,20 @@ export function Landing({ theme, toggleTheme, setPage }: LandingProps) {
             type="button"
             className="landing-theme-toggle"
             onClick={toggleTheme}
-            title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} mode`}
+            aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
           >
-            {theme === 'dark' ? '☀️' : '🌙'}
+            {theme === 'dark' ? 'Light' : 'Dark'}
           </button>
 
           {isAuthenticated ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <span className="landing-user-badge">👤 {user?.username}</span>
+            <div className="landing-nav-account">
+              <span className="landing-user-badge">{user?.username}</span>
               <button
                 type="button"
                 className="landing-btn-primary"
                 onClick={() => setPage('dashboard')}
               >
-                Go to Workspace →
+                Open workspace
               </button>
               <button
                 type="button"
@@ -57,7 +55,7 @@ export function Landing({ theme, toggleTheme, setPage }: LandingProps) {
               </button>
             </div>
           ) : (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div className="landing-nav-account">
               <button
                 type="button"
                 className="landing-btn-ghost"
@@ -70,24 +68,21 @@ export function Landing({ theme, toggleTheme, setPage }: LandingProps) {
                 className="landing-btn-primary"
                 onClick={() => setPage('register')}
               >
-                Get Started Free →
+                Create account
               </button>
             </div>
           )}
         </div>
       </header>
 
-      {/* Hero Section */}
       <section className="landing-hero">
-        <div className="landing-hero-badge">
-          <span className="pulse-dot" /> Next-Gen Enterprise Stock & POS Platform
-        </div>
+        <p className="landing-hero-eyebrow">For shops of every kind</p>
         <h1 className="landing-hero-title">
-          Smart Inventory Control, Unified Financials & Rapid POS
+          Run your shop with stock, sales and finances in step.
         </h1>
         <p className="landing-hero-sub">
-          Accelerate your operational throughput with intelligent barcode scanning, comprehensive
-          purchase ordering, double-entry stock movement ledgers, customer loan tracking, and real-time P&L analytics.
+          Manage inventory, purchases, sales and everyday expenses in one place. See what is moving,
+          what needs attention and how your business is doing.
         </p>
 
         <div className="landing-hero-cta">
@@ -97,7 +92,7 @@ export function Landing({ theme, toggleTheme, setPage }: LandingProps) {
               className="landing-btn-hero-primary"
               onClick={() => setPage('dashboard')}
             >
-              Open Dashboard Workspace
+              Open workspace
             </button>
           ) : (
             <>
@@ -106,82 +101,76 @@ export function Landing({ theme, toggleTheme, setPage }: LandingProps) {
                 className="landing-btn-hero-primary"
                 onClick={() => setPage('register')}
               >
-                Start Your Free Trial
+                Create an account
               </button>
               <button
                 type="button"
                 className="landing-btn-hero-secondary"
                 onClick={() => setPage('login')}
               >
-                Access Account
+                Sign in
               </button>
             </>
           )}
         </div>
 
-        {/* Hero Visual Mockup */}
-        <div className="landing-preview-card">
+        <div id="overview" className="landing-preview-card">
           <div className="preview-card-header">
-            <div className="preview-card-dots">
-              <span className="dot red" />
-              <span className="dot yellow" />
-              <span className="dot green" />
+            <div>
+              <span className="preview-card-kicker">Example workspace</span>
+              <strong className="preview-card-title">Business overview</strong>
             </div>
-            <span className="preview-card-title">TRI LTD ERP / Central Operations Terminal</span>
-            <div className="preview-badge">Live Sync Active</div>
+            <span className="preview-badge">Today</span>
           </div>
           <div className="preview-card-body">
             <div className="preview-stat-row">
               <div className="preview-stat-box">
-                <span className="stat-label">Active SKUs</span>
+                <span className="stat-label">Items in stock</span>
                 <span className="stat-value">1,482</span>
-                <span className="stat-tag positive">+14% this month</span>
+                <span className="stat-tag">Across your products</span>
               </div>
               <div className="preview-stat-box">
-                <span className="stat-label">Today's Sales</span>
+                <span className="stat-label">Sales today</span>
                 <span className="stat-value">3,850,000 RWF</span>
-                <span className="stat-tag positive">+22.4% vs avg</span>
+                <span className="stat-tag">Recorded at the counter</span>
               </div>
               <div className="preview-stat-box">
-                <span className="stat-label">Stock Discrepancy</span>
-                <span className="stat-value">0.00%</span>
-                <span className="stat-tag neutral">Ledger Verified</span>
+                <span className="stat-label">Purchases</span>
+                <span className="stat-value">12 orders</span>
+                <span className="stat-tag">Being received</span>
               </div>
               <div className="preview-stat-box">
-                <span className="stat-label">Total Loans Tracked</span>
-                <span className="stat-value">18 Active</span>
-                <span className="stat-tag warning">3 Due Soon</span>
+                <span className="stat-label">Customer balances</span>
+                <span className="stat-value">18 accounts</span>
+                <span className="stat-tag">Open balances</span>
               </div>
             </div>
 
             <div className="preview-mock-grid">
               <div className="mock-chart-panel">
-                <div className="mock-title">Revenue & Cash Flow Dynamics</div>
+                <div className="mock-title">Sales over the past six days</div>
                 <div className="mock-bars">
-                  <div className="bar" style={{ height: '40%' }} />
-                  <div className="bar" style={{ height: '65%' }} />
-                  <div className="bar" style={{ height: '55%' }} />
-                  <div className="bar" style={{ height: '80%' }} />
-                  <div className="bar" style={{ height: '95%' }} />
-                  <div className="bar highlight" style={{ height: '100%' }} />
+                  <div className="bar" style={{ height: '40%' }}><span>Mon</span></div>
+                  <div className="bar" style={{ height: '65%' }}><span>Tue</span></div>
+                  <div className="bar" style={{ height: '55%' }}><span>Wed</span></div>
+                  <div className="bar" style={{ height: '80%' }}><span>Thu</span></div>
+                  <div className="bar" style={{ height: '95%' }}><span>Fri</span></div>
+                  <div className="bar highlight" style={{ height: '100%' }}><span>Sat</span></div>
                 </div>
               </div>
               <div className="mock-activity-panel">
-                <div className="mock-title">Recent Verified Transactions</div>
+                <div className="mock-title">Recent activity</div>
                 <div className="mock-activity-item">
-                  <span>🟢 Sale Completed</span>
-                  <strong>#SL-2026-981</strong>
-                  <span>94,500 RWF</span>
+                  <span>Sale recorded</span>
+                  <strong>RWF 94,500</strong>
                 </div>
                 <div className="mock-activity-item">
-                  <span>🔵 Inbound Shipment</span>
-                  <strong>#PO-2026-440</strong>
-                  <span>120 Units</span>
+                  <span>Stock received</span>
+                  <strong>120 items</strong>
                 </div>
                 <div className="mock-activity-item">
-                  <span>⚖️ Physical Stock Count</span>
-                  <strong>SKU-IMP-09</strong>
-                  <span>Count: 45</span>
+                  <span>Stock count updated</span>
+                  <strong>45 items</strong>
                 </div>
               </div>
             </div>
@@ -189,96 +178,88 @@ export function Landing({ theme, toggleTheme, setPage }: LandingProps) {
         </div>
       </section>
 
-      {/* Features Grid */}
+      <section className="landing-shop-types" aria-label="Types of shops">
+        <p>One workspace for your kind of shop</p>
+        <ul>
+          <li>Grocery stores</li>
+          <li>Cafés</li>
+          <li>Bakeries</li>
+          <li>Electronics</li>
+          <li>Clothing</li>
+          <li>And more</li>
+        </ul>
+      </section>
+
       <section id="features" className="landing-features">
         <div className="landing-section-header">
-          <span className="section-pill">Core Architecture</span>
-          <h2>Everything Your Business Needs In One Place</h2>
-          <p>Built for retailers, distributors, and growing enterprises demanding absolute accuracy and speed.</p>
+          <p className="landing-section-eyebrow">The essentials, connected</p>
+          <h2>Made for the work behind every sale.</h2>
+          <p>Keep day-to-day records together, from the first purchase to the end-of-day report.</p>
         </div>
 
         <div className="features-grid">
           <div className="feature-card">
-            <div className="feature-icon">📦</div>
-            <h3>Inventory & Stock Movements</h3>
+            <div className="feature-icon">01</div>
+            <h3>Inventory</h3>
             <p>
-              Complete SKU tracking, automated stock count reconciliations, low-stock alerts, and double-entry movement auditing.
+              Keep product details, stock levels and movements up to date across your business.
             </p>
           </div>
 
           <div className="feature-card">
-            <div className="feature-icon">🛒</div>
-            <h3>Smart Purchasing & Inbound</h3>
+            <div className="feature-icon">02</div>
+            <h3>Purchases</h3>
             <p>
-              Streamline supplier POs, barcode scanning at receiving, automated cost basis allocation, and status flows.
+              Record supplier orders and track deliveries as stock arrives.
             </p>
           </div>
 
           <div className="feature-card">
-            <div className="feature-icon">⚡</div>
-            <h3>High-Speed Point of Sale</h3>
+            <div className="feature-icon">03</div>
+            <h3>Sales</h3>
             <p>
-              Lightning fast cart processing, multi-item barcode checkout, customer accounts, and receipt export.
+              Make sales, issue receipts and keep customer accounts in one place.
             </p>
           </div>
 
           <div className="feature-card">
-            <div className="feature-icon">💳</div>
-            <h3>Expense & Loan Auditing</h3>
+            <div className="feature-icon">04</div>
+            <h3>Expenses &amp; balances</h3>
             <p>
-              Track loans given to customers or taken from lenders, record partial repayments, and audit daily operational expenses.
+              Track everyday costs, customer balances and repayments as they happen.
             </p>
           </div>
 
           <div className="feature-card">
-            <div className="feature-icon">📊</div>
-            <h3>Financial Insights & P&L</h3>
+            <div className="feature-icon">05</div>
+            <h3>Reports</h3>
             <p>
-              Interactive margin calculators, gross profit analysis, customizable time filters, and one-click CSV export.
+              Review sales, stock and financial activity with reports you can export.
             </p>
           </div>
 
           <div className="feature-card">
-            <div className="feature-icon">🔒</div>
-            <h3>Bank-Grade Security</h3>
+            <div className="feature-icon">06</div>
+            <h3>Team access</h3>
             <p>
-              Bcrypt encryption, signed JWT bearer authentication, role-based controls, and fully isolated data stores.
+              Set up staff accounts and control which parts of the workspace they can use.
             </p>
           </div>
         </div>
       </section>
 
-      {/* Metrics Section */}
-      <section id="metrics" className="landing-metrics">
-        <div className="metric-item">
-          <strong>99.9%</strong>
-          <span>Inventory Accuracy</span>
-        </div>
-        <div className="metric-item">
-          <strong>10x</strong>
-          <span>Faster Stock Auditing</span>
-        </div>
-        <div className="metric-item">
-          <strong>0.2s</strong>
-          <span>POS Transaction Speed</span>
-        </div>
-        <div className="metric-item">
-          <strong>100%</strong>
-          <span>Traceable Movement Ledger</span>
-        </div>
-      </section>
-
-      {/* Call To Action Banner */}
       <section className="landing-cta-banner">
-        <h2>Ready to transform your business operations?</h2>
-        <p>Join businesses managing their stock, orders, and finances with unmatched efficiency.</p>
-        <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', marginTop: '1.5rem', flexWrap: 'wrap' }}>
+        <div>
+          <h2>Bring your daily records together.</h2>
+          <p>Get started with TRI LTD or sign in to continue where you left off.</p>
+        </div>
+        <div className="landing-cta-actions">
           <button
             type="button"
             className="landing-btn-hero-primary"
             onClick={() => setPage(isAuthenticated ? 'dashboard' : 'register')}
           >
-            {isAuthenticated ? 'Enter Workspace' : 'Get Started Now'}
+            {isAuthenticated ? 'Open workspace' : 'Create an account'}
           </button>
           {!isAuthenticated && (
             <button
@@ -286,23 +267,22 @@ export function Landing({ theme, toggleTheme, setPage }: LandingProps) {
               className="landing-btn-hero-secondary"
               onClick={() => setPage('login')}
             >
-              Sign In to Existing Account
+              Sign in
             </button>
           )}
         </div>
       </section>
 
-      {/* Footer */}
       <footer className="landing-footer">
         <div className="landing-footer-content">
           <div className="landing-brand">
-            <div className="landing-logo-icon">▲</div>
+            <div className="landing-logo-icon">T</div>
             <div className="landing-brand-text">
               <strong>TRI LTD</strong>
-              <span>Business Suite</span>
+              <span>Stock &amp; business management</span>
             </div>
           </div>
-          <p>© {new Date().getFullYear()} TRI LTD Systems. All rights reserved. Enterprise Stock, POS & Ledger Engine.</p>
+          <p>© {new Date().getFullYear()} TRI LTD</p>
         </div>
       </footer>
     </div>
