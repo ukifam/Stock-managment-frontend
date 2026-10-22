@@ -561,6 +561,7 @@ function CostPanel({ plan, currency }: { plan: ProductionPlan; currency: string 
         {costs.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{formatMoney(Number(value), currency)}</dd></div>)}
         <div className="production-cost-total"><dt>Total cost</dt><dd>{formatMoney(plan.cost.total, currency)}</dd></div>
         <div><dt>Unit cost</dt><dd>{formatMoney(plan.cost.unit, currency)}</dd></div>
+        {plan.servingSize && plan.servingUnit && <div><dt>Serving size</dt><dd>{plan.servingSize} {plan.servingUnit}</dd></div>}
       </dl>
     </aside>
   )
@@ -883,6 +884,8 @@ function RecipeModal({ inventory, configuration, processes, currency, onClose, o
   const [productName, setProductName] = useState(defaultFinishedProduct?.item || '')
   const [productUnit, setProductUnit] = useState(defaultFinishedProduct?.baseUnit || 'piece')
   const [yieldQuantity, setYieldQuantity] = useState('1')
+  const [servingSize, setServingSize] = useState('')
+  const [servingUnit, setServingUnit] = useState('ml')
   const [sellingPrice, setSellingPrice] = useState('0')
   const [expectedWastePercent, setExpectedWastePercent] = useState('0')
   const [processId, setProcessId] = useState('')
@@ -912,7 +915,7 @@ function RecipeModal({ inventory, configuration, processes, currency, onClose, o
       setSaving(true)
       setError('')
       await onSave({
-        productSku: finishedProductSku || undefined, productName: productName.trim(), productUnit, yieldQuantity: Number(yieldQuantity), sellingPrice: Number(sellingPrice || 0), expectedWastePercent: Number(expectedWastePercent || 0), processId,
+        productSku: finishedProductSku || undefined, productName: productName.trim(), productUnit, yieldQuantity: Number(yieldQuantity), servingSize: Number(servingSize || 0), servingUnit: servingSize ? servingUnit : '', sellingPrice: Number(sellingPrice || 0), expectedWastePercent: Number(expectedWastePercent || 0), processId,
         materials, labor: [], machines, utilities, processSteps: steps.filter((step) => step.name.trim()), notes, active: false,
       })
     } catch (saveError) {
@@ -939,6 +942,8 @@ function RecipeModal({ inventory, configuration, processes, currency, onClose, o
           <label>Finished product name<input value={productName} onChange={(event) => setProductName(event.target.value)} readOnly={Boolean(finishedProductSku)} required /></label>
           <label>Yield quantity<input type="number" min="0.01" step="0.01" value={yieldQuantity} onChange={(event) => setYieldQuantity(event.target.value)} required /></label>
           <label>Output unit<select value={productUnit} onChange={(event) => setProductUnit(event.target.value)}>{configuration.units.map((unit) => <option key={unit}>{unit}</option>)}</select></label>
+          <label>Serving size<input type="number" min="0" step="0.01" value={servingSize} onChange={(event) => setServingSize(event.target.value)} placeholder="Optional" /></label>
+          <label>Serving measurement<select value={servingUnit} onChange={(event) => setServingUnit(event.target.value)}>{configuration.units.map((unit) => <option key={unit}>{unit}</option>)}</select></label>
           <label>Selling price ({currency})<input type="number" min="0" step="0.01" value={sellingPrice} onChange={(event) => setSellingPrice(event.target.value)} /></label>
           <label>Expected product waste (%)<input type="number" min="0" max="100" step="0.01" value={expectedWastePercent} onChange={(event) => setExpectedWastePercent(event.target.value)} /></label>
           <label>Reusable process<select value={processId} onChange={(event) => setProcessId(event.target.value)}><option value="">Use recipe steps</option>{processes.filter((process) => process.active).map((process) => <option key={process._id} value={process._id}>{process.name}</option>)}</select></label>

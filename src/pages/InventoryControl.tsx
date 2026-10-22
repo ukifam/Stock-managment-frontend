@@ -16,7 +16,7 @@ import type { PageRenderProps, ThemePageProps } from '../types'
 type Tab = 'items' | 'units' | 'partners' | 'warehouses'
 
 const EMPTY_ITEM = {
-  item: '', sku: '', description: '', category: 'Materials', itemType: 'raw_material' as ItemMaster['itemType'], baseUnit: 'piece',
+  item: '', sku: '', description: '', category: 'Materials', itemType: 'raw_material' as ItemMaster['itemType'], baseUnit: 'piece', measurementAmount: '1',
   minimumStock: '0', maximumStock: '0', reorderLevel: '0', purchasePrice: '0', sellingPrice: '0', defaultSupplierId: '', defaultWarehouseCode: '',
   supplierIds: [] as string[], supplierPackSize: '1',
   batchTracking: false, expiryTracking: false, serialTracking: false,
@@ -92,6 +92,7 @@ export function InventoryControl({ theme, toggleTheme, setPage }: ThemePageProps
         reorderLevel: Number(item.reorderLevel),
         purchasePrice: Number(item.purchasePrice),
         sellingPrice: Number(item.sellingPrice),
+        measurementAmount: Number(item.measurementAmount),
         supplierOptions: item.supplierIds.map((supplierId) => ({
           supplierId,
           supplierName: data?.suppliers.find((row) => row._id === supplierId)?.name || '',
@@ -182,7 +183,8 @@ export function InventoryControl({ theme, toggleTheme, setPage }: ThemePageProps
           <label>Item code<input required value={item.sku} onChange={(event) => setItem({ ...item, sku: event.target.value.toUpperCase() })} /></label>
           <label>Category<input required value={item.category} onChange={(event) => setItem({ ...item, category: event.target.value })} /></label>
           <label>Type<select value={item.itemType} onChange={(event) => setItem({ ...item, itemType: event.target.value as ItemMaster['itemType'] })}>{itemTypes.map((type) => <option key={type} value={type}>{labelize(type)}</option>)}</select></label>
-          <label>Base unit<select value={item.baseUnit} onChange={(event) => setItem({ ...item, baseUnit: event.target.value })}>{units.map((row) => <option key={row.code} value={row.code}>{row.name} ({row.symbol || row.code})</option>)}</select></label>
+          <label>Measurement amount<input required type="number" min="0.00000001" step="any" value={item.measurementAmount} onChange={(event) => setItem({ ...item, measurementAmount: event.target.value })} placeholder="e.g. 2" /></label>
+          <label>Measurement unit<select value={item.baseUnit} onChange={(event) => setItem({ ...item, baseUnit: event.target.value })}>{units.map((row) => <option key={row.code} value={row.code}>{row.name} ({row.symbol || row.code})</option>)}</select></label>
           <label>Default warehouse<select value={item.defaultWarehouseCode} onChange={(event) => setItem({ ...item, defaultWarehouseCode: event.target.value })}><option value="">Main storage</option>{warehouses.map((row) => <option key={row.code} value={row.code}>{row.name}</option>)}</select></label>
           <label>Minimum stock<input type="number" min="0" step="any" value={item.minimumStock} onChange={(event) => setItem({ ...item, minimumStock: event.target.value })} /></label>
           <label>Maximum stock<input type="number" min="0" step="any" value={item.maximumStock} onChange={(event) => setItem({ ...item, maximumStock: event.target.value })} /></label>

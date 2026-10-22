@@ -72,6 +72,8 @@ export type PipelineData = {
   productName: string
   businessType: string
   singleUnitLabel: string
+  singleUnitAmount?: number
+  singleUnitMeasure?: string
   ingredients: Ingredient[]
   targetQuantity: number
   scheduledDate: string
@@ -415,6 +417,8 @@ function createEmptyPipeline(): PipelineData {
     productName: '',
     businessType: '',
     singleUnitLabel: 'unit',
+    singleUnitAmount: 1,
+    singleUnitMeasure: 'ml',
     ingredients: [],
     targetQuantity: 1,
     scheduledDate: new Date().toISOString().slice(0, 10),
@@ -1245,6 +1249,7 @@ function AddIngredientModal({
   const [category, setCategory] = useState('Raw Materials')
   const [itemType, setItemType] = useState<'raw_material' | 'packaging_material'>('raw_material')
   const [baseUnit, setBaseUnit] = useState(units.includes('kg') ? 'kg' : (units[0] || 'piece'))
+  const [measurementAmount, setMeasurementAmount] = useState('1')
   const [purchasePrice, setPurchasePrice] = useState('0')
   const [minimumStock, setMinimumStock] = useState('10')
   const [description, setDescription] = useState('')
@@ -1270,6 +1275,7 @@ function AddIngredientModal({
         category: category.trim() || (itemType === 'packaging_material' ? 'Packaging' : 'Raw Materials'),
         itemType,
         baseUnit: cleanUnitName(baseUnit || 'piece'),
+        measurementAmount: Number(measurementAmount),
         purchasePrice: Number(purchasePrice) || 0,
         price: Number(purchasePrice) || 0,
         minimumStock: Number(minimumStock) || 0,
@@ -1312,6 +1318,18 @@ function AddIngredientModal({
                   <option value="raw_material">Raw Material / Ingredient</option>
                   <option value="packaging_material">Packaging / Container</option>
                 </select>
+              </label>
+              <label className="pipeline-field">
+                <span>Measurement Amount *</span>
+                <input
+                  type="number"
+                  required
+                  min="0.00000001"
+                  step="any"
+                  placeholder="e.g. 2 or 200"
+                  value={measurementAmount}
+                  onChange={(e) => setMeasurementAmount(e.target.value)}
+                />
               </label>
               <label className="pipeline-field">
                 <span>Measurement Unit * (Recorded)</span>
@@ -2271,6 +2289,8 @@ function PlanStage({
       ? cleanUnitName(pipeline.singleUnitLabel)
       : (detectedPreset?.unitLabel || 'unit')
   )
+  const [singleUnitAmount, setSingleUnitAmount] = useState(pipeline.singleUnitAmount || 1)
+  const [singleUnitMeasure, setSingleUnitMeasure] = useState(pipeline.singleUnitMeasure || 'ml')
   const [ingredients, setIngredients] = useState<Ingredient[]>(() => {
     if (pipeline.ingredients.length > 0) return pipeline.ingredients
     if (detectedPreset && detectedPreset.ingredients.length > 0) {
@@ -2397,6 +2417,8 @@ function PlanStage({
       productName: productName.trim(),
       businessType,
       singleUnitLabel: cleanUnitName(singleUnitLabel),
+      singleUnitAmount,
+      singleUnitMeasure: cleanUnitName(singleUnitMeasure),
       ingredients: validIngredients,
       targetQuantity,
       scheduledDate,
@@ -2487,6 +2509,17 @@ function PlanStage({
               {availableUnits.map((u) => (
                 <option key={u} value={u} style={{ backgroundColor: '#18181b', color: '#f4f4f5' }}>{u}</option>
               ))}
+            </select>
+          </label>
+          <label className="pipeline-field">
+            <span>Amount per {cleanUnitName(singleUnitLabel)}</span>
+            <input type="number" min="0.0001" step="any" value={singleUnitAmount || ''} onChange={(e) => setSingleUnitAmount(Number(e.target.value))} placeholder="e.g. 250" />
+          </label>
+          <label className="pipeline-field">
+            <span>Amount unit</span>
+            <select value={singleUnitMeasure} onChange={(e) => setSingleUnitMeasure(cleanUnitName(e.target.value))} style={{ colorScheme: 'dark', backgroundColor: '#162033', color: '#f1f5f9' }}>
+              {!availableUnits.includes(cleanUnitName(singleUnitMeasure)) && singleUnitMeasure && <option value={singleUnitMeasure}>{singleUnitMeasure}</option>}
+              {availableUnits.map((u) => <option key={u} value={u}>{u}</option>)}
             </select>
           </label>
           <label className="pipeline-field">
@@ -2623,7 +2656,7 @@ function PlanStage({
 
           {ingredients.length > 0 && unitCostPerProduct > 0 && (
             <div className="pipeline-unit-cost-preview">
-              Material cost per {cleanUnitName(singleUnitLabel)}: <strong>{formatMoney(unitCostPerProduct, currency)}</strong>
+              Material cost per {cleanUnitName(singleUnitLabel)}{singleUnitAmount > 0 ? ` (${singleUnitAmount} ${cleanUnitName(singleUnitMeasure)})` : ''}: <strong>{formatMoney(unitCostPerProduct, currency)}</strong>
             </div>
           )}
         </fieldset>

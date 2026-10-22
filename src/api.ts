@@ -489,6 +489,7 @@ export type ItemMaster = {
   category: string
   itemType: 'raw_material' | 'packaging_material' | 'consumable' | 'finished_product' | 'semi_finished_product' | 'by_product'
   baseUnit: string
+  measurementAmount: number
   status: string
   stock: number
   minimumStock: number
@@ -1023,6 +1024,8 @@ export type ProductionRecipe = {
   approvedAt?: string
   sellingPrice: number
   yieldQuantity: number
+  servingSize?: number
+  servingUnit?: string
   expectedWastePercent?: number
   materials: ProductionMaterial[]
   labor: ProductionResourceAssignment[]
@@ -1078,6 +1081,8 @@ export type ProductionPlan = {
   productSku: string
   productName: string
   productUnit: string
+  servingSize?: number
+  servingUnit?: string
   plannedQuantity: number
   yieldQuantity: number
   batches: number
