@@ -124,7 +124,7 @@ export function Inventory({ theme = 'dark', toggleTheme = () => {}, setPage }: P
       Item: row.item,
       SKU: row.sku,
       Category: row.category,
-      Stock: row.stock,
+      Stock: String(row.stock),
       Price: row.price,
       Status: row.status,
     })))

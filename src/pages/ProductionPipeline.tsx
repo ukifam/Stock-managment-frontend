@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, type FormEvent } from 'react'
-import { api, type InventoryRow, type ShopRole, type ItemMaster, type UnitDefinition, type ProductionRecipe } from '../api'
+import { api, type InventoryRow, type ShopRole, type ItemMaster, type ProductionRecipe } from '../api'
 import { Topbar } from '../components/Topbar'
 import { formatMoney } from '../utils/money'
 import type { Theme } from '../types'
@@ -450,7 +450,7 @@ function getStorageKey(user?: any) {
   return `tri_production_pipelines_${owner}_${branch}`
 }
 
-function convertServerOrderToPipeline(order: any): PipelineData {
+export function convertServerOrderToPipeline(order: any): PipelineData {
   const stageMap: Record<string, PipelineStage> = {
     DRAFT: 'plan',
     PENDING_APPROVAL: 'receive_plan',
@@ -485,7 +485,7 @@ function convertServerOrderToPipeline(order: any): PipelineData {
   const currentStage = stageMap[String(order.status).toUpperCase()] || 'plan'
   const allStages: PipelineStage[] = ['plan', 'receive_plan', 'purchase', 'store_raw', 'produce', 'quality_check', 'finish', 'store_finished', 'sell', 'cost', 'analyze']
   const stageIdx = allStages.indexOf(currentStage)
-  const completedStages = stageIdx >= 0
+  const completedStages: PipelineStage[] = stageIdx >= 0
     ? allStages.slice(0, stageIdx + (order.status === 'COMPLETED' ? 1 : 0))
     : ['plan']
 
@@ -605,8 +605,9 @@ export function ProductionPipeline({ theme = 'dark', toggleTheme = () => {}, cur
             category: r.category || 'General',
             itemType: (r.itemType as any) || (isFinishedProduct(r) ? 'finished_product' : 'raw_material'),
             baseUnit: r.baseUnit || 'piece',
+            measurementAmount: Number(r.measurementAmount) || 1,
             status: r.status || 'Active',
-            stock: r.stock || 0,
+            stock: Number(r.stock) || 0,
             minimumStock: r.minimumStock || 0,
             maximumStock: r.maximumStock || 0,
             reorderLevel: r.reorderLevel || 0,
@@ -614,6 +615,11 @@ export function ProductionPipeline({ theme = 'dark', toggleTheme = () => {}, cur
             supplierOptions: [],
             purchasePrice: (r as any).purchasePrice ?? r.price ?? 0,
             sellingPrice: (r as any).sellingPrice ?? r.price ?? 0,
+            priceTiers: [],
+            defaultWarehouseCode: '',
+            batchTracking: false,
+            expiryTracking: false,
+            serialTracking: false,
           })
         }
       })

@@ -54,15 +54,24 @@ export type CatalogItem = {
 }
 
 export type InventoryRow = {
+  id?: string
   date: string
   item: string
+  description?: string
+  itemType?: string
+  baseUnit?: string
+  measurementAmount?: number
+  minimumStock?: number
+  maximumStock?: number
+  reorderLevel?: number
+  purchasePrice?: number
   meta: string
   sku: string
   category: string
   rawStock: number
   rawCapacity: number
   rawPrice: number
-  stock: string
+  stock: string | number
   price: string
   status: string
   serial?: string
@@ -489,7 +498,7 @@ export type ItemMaster = {
   category: string
   itemType: 'raw_material' | 'packaging_material' | 'consumable' | 'finished_product' | 'semi_finished_product' | 'by_product'
   baseUnit: string
-  measurementAmount: number
+  measurementAmount?: number
   status: string
   stock: number
   minimumStock: number
@@ -498,6 +507,7 @@ export type ItemMaster = {
   defaultSupplierId: string
   supplierOptions: SupplierOption[]
   purchasePrice: number
+  price?: number
   sellingPrice: number
   priceTiers: Array<{ name: string; price: number }>
   defaultWarehouseCode: string
@@ -1370,7 +1380,7 @@ export const api = {
   updateSupplier: (id: string, payload: Partial<SupplierRecord>) => request<SupplierRecord>(`/master-data/suppliers/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   createCustomer: (payload: Omit<CustomerRecord, '_id'>) => request<CustomerRecord>('/master-data/customers', { method: 'POST', body: JSON.stringify(payload) }),
   updateCustomer: (id: string, payload: Partial<CustomerRecord>) => request<CustomerRecord>(`/master-data/customers/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(payload) }),
-  createMasterItem: (payload: Partial<ItemMaster> & { item: string; sku: string; category: string }) => request<ItemMaster>('/master-data/items', { method: 'POST', body: JSON.stringify(payload) }),
+  createMasterItem: (payload: Partial<ItemMaster> & { item: string; sku: string; category: string; price?: number }) => request<ItemMaster>('/master-data/items', { method: 'POST', body: JSON.stringify(payload) }),
   updateMasterItem: (sku: string, payload: Partial<ItemMaster>) => request<ItemMaster>(`/master-data/items/${encodeURIComponent(sku)}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   createWarehouse: (payload: Omit<WarehouseRecord, '_id'>) => request<WarehouseRecord>('/master-data/warehouses', { method: 'POST', body: JSON.stringify(payload) }),
   updateWarehouse: (code: string, payload: Partial<WarehouseRecord>) => request<WarehouseRecord>(`/master-data/warehouses/${encodeURIComponent(code)}`, { method: 'PATCH', body: JSON.stringify(payload) }),
