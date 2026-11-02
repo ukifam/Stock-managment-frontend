@@ -11,14 +11,16 @@ type TopbarProps = {
   theme: Theme
   toggleTheme: () => void
   minimal?: boolean
+  onSearchChange?: (query: string) => void
 }
 
 export function Topbar({
-  title = 'TRI LTD Business Suite',
-  placeholder = 'Search inventory, sales, reports...',
+  title = '',
+  placeholder = 'Search products, sales, purchases…',
   theme,
   toggleTheme,
   minimal = false,
+  onSearchChange,
 }: TopbarProps) {
   const { user } = useAuth()
   const [searchValue, setSearchValue] = useState('')
@@ -28,15 +30,9 @@ export function Topbar({
   const [branches, setBranches] = useState<OrganizationBranch[]>([])
   const [activeBranchCode, setActiveBranchCode] = useState('')
   const normalizedQuery = searchValue.trim()
-  const userInitials = String(user?.username || 'User')
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part.charAt(0).toUpperCase())
-    .join('') || 'U'
 
   useEffect(() => {
+    if (onSearchChange) return
     if (normalizedQuery.length < 2) return
 
     let isCurrent = true
@@ -62,7 +58,7 @@ export function Topbar({
       isCurrent = false
       window.clearTimeout(timeout)
     }
-  }, [normalizedQuery])
+  }, [normalizedQuery, onSearchChange])
 
   useEffect(() => {
     if (!user || minimal) return
@@ -104,7 +100,8 @@ export function Topbar({
       setSearchResults([])
       setSearchError('')
       setSearchLoading(false)
-    } else if (event.key === 'Enter' && searchResults[0]) {
+      onSearchChange?.('')
+    } else if (!onSearchChange && event.key === 'Enter' && searchResults[0]) {
       event.preventDefault()
       selectSearchResult(searchResults[0])
     }
@@ -112,7 +109,7 @@ export function Topbar({
 
   return (
     <header className={`topbar${minimal ? ' minimal' : ''}`}>
-      <strong className="version">{title}</strong>
+      {title && <strong className="version">{title}</strong>}
       {!minimal && (
         <div className="global-search">
           <label className="search">
@@ -122,12 +119,13 @@ export function Topbar({
               placeholder={placeholder}
               role="combobox"
               aria-autocomplete="list"
-              aria-expanded={normalizedQuery.length >= 2}
+              aria-expanded={!onSearchChange && normalizedQuery.length >= 2}
               aria-controls="global-search-results"
               onChange={(event) => {
                 const value = event.target.value
                 setSearchValue(value)
-                setSearchLoading(value.trim().length >= 2)
+                onSearchChange?.(value)
+                setSearchLoading(!onSearchChange && value.trim().length >= 2)
                 if (value.trim().length < 2) {
                   setSearchResults([])
                   setSearchError('')
@@ -136,9 +134,9 @@ export function Topbar({
               onKeyDown={handleSearchKeyDown}
             />
           </label>
-          {normalizedQuery.length >= 2 && (
+          {!onSearchChange && normalizedQuery.length >= 2 && (
             <div id="global-search-results" className="global-search-results" role="listbox" aria-label="Search results">
-              {searchLoading && <div className="global-search-message">Searching all records…</div>}
+              {searchLoading && <div className="global-search-message">Searching…</div>}
               {!searchLoading && searchError && <div className="global-search-message error">{searchError}</div>}
               {!searchLoading && !searchError && searchResults.length === 0 && <div className="global-search-message">No matching records.</div>}
               {!searchLoading && searchResults.map((result) => (
@@ -154,7 +152,6 @@ export function Topbar({
                   <span className="global-search-result-type">{result.type}</span>
                 </button>
               ))}
-              {!searchLoading && searchResults.length > 0 && <div className="global-search-hint">Enter opens the first result · Esc closes</div>}
             </div>
           )}
         </div>
@@ -175,22 +172,10 @@ export function Topbar({
             </select>
           </label>
         )}
-        <button type="button" className="theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
-          {theme === 'dark' ? 'Light' : 'Dark'}
+        <button type="button" className="theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
+          {theme === 'dark' ? '☀' : '☾'}
         </button>
-        {!minimal && (
-          <>
-            <button type="button" className="scan-button">
-              Scan
-            </button>
-            <NotificationsPopover />
-            <button type="button" aria-label="Help" className="icon-button help" />
-            <button type="button" aria-label="Apps" className="icon-button apps" />
-            <div className="operator" aria-label={`Signed in as ${user?.username || 'user'}`} title={user?.username || 'User'}>
-              <span>{userInitials}</span>
-            </div>
-          </>
-        )}
+        {!minimal && <NotificationsPopover />}
       </div>
     </header>
   )

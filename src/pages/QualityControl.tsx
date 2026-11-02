@@ -134,7 +134,7 @@ export function QualityControl({ theme, toggleTheme }: QualityControlProps) {
       <Topbar title="Quality Control" theme={theme} toggleTheme={toggleTheme} />
       <section className="page-content">
         <header className="page-heading">
-          <div><h1>Quality Control</h1><p>Define measurable standards and record batch inspections.</p></div>
+          <div><h1>Quality Control</h1></div>
         </header>
         {error && <div className="notice error" role="alert">{error}</div>}
         {notice && <div className="notice success" role="status">{notice}</div>}

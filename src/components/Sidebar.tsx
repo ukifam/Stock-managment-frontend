@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
-import { pageRegistry } from '../pages'
+import { useState } from 'react'
 import type { Page } from '../types'
 import { useAuth } from '../context/AuthContext'
+import { PRODUCTION_PAGES, canAccess, isSystemAdminRole, moduleForPage } from '../utils/access'
 
 type SidebarProps = {
   page: Page
@@ -10,155 +10,116 @@ type SidebarProps = {
   processingEnabled?: boolean
 }
 
-type NavSubItem = {
-  id: Page
-  label: string
-  icon: string
-}
+type NavItem = { id: Page; label: string }
 
-type NavGroupConfig = {
+type NavGroup = {
   id: string
   label: string
   iconClass: string
-  defaultPage: Page
   pages: Page[]
-  items: NavSubItem[]
+  items: NavItem[]
+  processingOnly?: boolean
 }
 
-const NAV_GROUPS: NavGroupConfig[] = [
+const NAV_GROUPS: NavGroup[] = [
   {
-    id: 'inventory-group',
-    label: 'Inventory',
-    iconClass: 'box',
-    defaultPage: 'inventory',
-    pages: ['inventory', 'inventory-control', 'stock-movements', 'stock-adjustments'],
+    id: 'sales-group',
+    label: 'Sales',
+    iconClass: 'tag',
+    pages: ['sales', 'sale-items', 'sales-report'],
     items: [
-      { id: 'inventory', label: 'Products', icon: '📦' },
-      { id: 'inventory-control', label: 'Inventory Setup', icon: '🛠️' },
-      { id: 'stock-movements', label: 'Movements', icon: '↕️' },
-      { id: 'stock-adjustments', label: 'Adjustments', icon: '✏️' },
+      { id: 'sales', label: 'Orders' },
+      { id: 'sale-items', label: 'Items sold' },
+      { id: 'sales-report', label: 'Report' },
     ],
   },
   {
     id: 'purchases-group',
     label: 'Purchases',
     iconClass: 'cart',
-    defaultPage: 'purchases',
     pages: ['purchases', 'purchase-items', 'purchases-report'],
     items: [
-      { id: 'purchases', label: 'All Purchases', icon: '🛒' },
-      { id: 'purchase-items', label: 'Purchase Items', icon: '📋' },
-      { id: 'purchases-report', label: 'Purchases Report', icon: '📊' },
+      { id: 'purchases', label: 'Orders' },
+      { id: 'purchase-items', label: 'Items bought' },
+      { id: 'purchases-report', label: 'Report' },
     ],
   },
   {
-    id: 'sales-group',
-    label: 'Sales',
-    iconClass: 'tag',
-    defaultPage: 'sales',
-    pages: ['sales', 'sale-items', 'sales-report'],
+    id: 'inventory-group',
+    label: 'Inventory',
+    iconClass: 'box',
+    pages: ['inventory', 'inventory-control', 'stock-movements', 'stock-adjustments', 'transfers'],
     items: [
-      { id: 'sales', label: 'All Sales', icon: '🏷️' },
-      { id: 'sale-items', label: 'Sale Items', icon: '📋' },
-      { id: 'sales-report', label: 'Sales Report', icon: '📊' },
-    ],
-  },
-  {
-    id: 'expenses-group',
-    label: 'Expenses',
-    iconClass: 'receipt',
-    defaultPage: 'expenses',
-    pages: ['expenses', 'expense-items', 'expenses-report'],
-    items: [
-      { id: 'expenses', label: 'All Expenses', icon: '🧾' },
-      { id: 'expense-items', label: 'Expense Items', icon: '📋' },
-      { id: 'expenses-report', label: 'Expenses Report', icon: '📊' },
-    ],
-  },
-  {
-    id: 'loans-group',
-    label: 'Loans & Debt',
-    iconClass: 'credit-card',
-    defaultPage: 'loans',
-    pages: ['loans', 'loans-given', 'loans-taken', 'loans-repayments'],
-    items: [
-      { id: 'loans-given', label: 'Loans Given', icon: '📤' },
-      { id: 'loans-taken', label: 'Loans Taken', icon: '📥' },
-      { id: 'loans-repayments', label: 'Repayments', icon: '💳' },
+      { id: 'inventory', label: 'Products' },
+      { id: 'stock-movements', label: 'Movements' },
+      { id: 'stock-adjustments', label: 'Adjustments' },
+      { id: 'transfers', label: 'Transfers' },
+      { id: 'inventory-control', label: 'Setup' },
     ],
   },
   {
     id: 'production-group',
     label: 'Production',
     iconClass: 'box',
-    defaultPage: 'production-pipeline',
-    pages: ['production-pipeline', 'production', 'production-objectives', 'production-recipes', 'production-processes', 'production-orders', 'production-procurement', 'production-resources', 'production-waste'],
+    pages: [...PRODUCTION_PAGES, 'quality-control'],
+    processingOnly: true,
     items: [
-      { id: 'production-pipeline', label: 'Pipeline', icon: '🏭' },
+      { id: 'production-pipeline', label: 'Pipeline' },
+      { id: 'production-recipes', label: 'Recipes' },
+      { id: 'production-orders', label: 'Orders' },
+      { id: 'quality-control', label: 'Quality' },
     ],
   },
   {
-    id: 'transfers-group',
-    label: 'Transfers',
-    iconClass: 'cart',
-    defaultPage: 'transfers',
-    pages: ['transfers'],
+    id: 'money-group',
+    label: 'Expenses & Loans',
+    iconClass: 'receipt',
+    pages: ['expenses', 'expense-items', 'expenses-report', 'loans', 'loans-given', 'loans-taken', 'loans-repayments'],
     items: [
-      { id: 'transfers', label: 'Partner Transfers', icon: '🔁' },
+      { id: 'expenses', label: 'Expenses' },
+      { id: 'expenses-report', label: 'Expense report' },
+      { id: 'loans-given', label: 'Loans given' },
+      { id: 'loans-taken', label: 'Loans taken' },
+      { id: 'loans-repayments', label: 'Repayments' },
     ],
   },
   {
-    id: 'users-group',
-    label: 'User Management',
+    id: 'business-group',
+    label: 'Business',
     iconClass: 'gear',
-    defaultPage: 'shop-users',
-    pages: ['shop-users', 'access-control'],
+    pages: ['organization', 'shop-users', 'access-control'],
     items: [
-      { id: 'shop-users', label: 'Workers & Staff', icon: '👥' },
-      { id: 'access-control', label: 'Roles & Permissions', icon: '🛡️' },
+      { id: 'organization', label: 'Business & branches' },
+      { id: 'shop-users', label: 'Staff' },
+      { id: 'access-control', label: 'Roles' },
     ],
   },
 ]
 
 export function Sidebar({ page, setPage, onNewEntry, processingEnabled = false }: SidebarProps) {
-  const { isAuthenticated, user, logout } = useAuth()
-  // Track open state for each group
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
-    const initial: Record<string, boolean> = {}
-    NAV_GROUPS.forEach((g) => {
-      initial[g.id] = g.pages.includes(page)
-    })
-    return initial
-  })
+  const { user, logout } = useAuth()
+  const activeGroupId = NAV_GROUPS.find((group) => group.pages.includes(page))?.id ?? ''
+  // Only one group is expanded at a time so the menu fits without scrolling.
+  const [expanded, setExpanded] = useState<{ id: string; forPage: Page } | null>(null)
+  const openGroupId = expanded && expanded.forPage === page ? expanded.id : activeGroupId
+  const canView = (module: string) => canAccess(user, module)
+  const visibleItems = (group: NavGroup) => group.items.filter((item) => canView(moduleForPage(item.id)))
+  const visibleGroups = NAV_GROUPS.filter((group) => (!group.processingOnly || processingEnabled) && visibleItems(group).length > 0)
 
-  // Automatically expand group when navigating to one of its sub-pages
-  useEffect(() => {
-    NAV_GROUPS.forEach((g) => {
-      if (g.pages.includes(page)) {
-        setOpenGroups((prev) => ({ ...prev, [g.id]: true }))
-      }
-    })
-  }, [page])
-
-  const toggleGroup = (group: NavGroupConfig) => {
-    setOpenGroups((prev) => {
-      const willOpen = !prev[group.id]
-      if (willOpen && !group.pages.includes(page)) {
-        setPage(group.items.find((item) => canView(moduleForPage(item.id)))?.id || group.defaultPage)
-      }
-      return { ...prev, [group.id]: willOpen }
-    })
+  const toggleGroup = (group: NavGroup) => {
+    if (openGroupId === group.id) {
+      setExpanded({ id: '', forPage: page })
+      return
+    }
+    setExpanded({ id: group.id, forPage: page })
   }
 
-  const dashPage = pageRegistry.find((p) => p.id === 'dashboard')
-  const reportsPage = pageRegistry.find((p) => p.id === 'reports')
-  const settingsPage = pageRegistry.find((p) => p.id === 'settings')
-  const isShopAdmin = String(user?.role || '').trim().toLowerCase() === 'admin' || isSystemAdminRole(user?.role)
-  const canView = (module: string) => isShopAdmin || Boolean(user?.permissions?.find((permission) => permission.module === module)?.actions.includes('view'))
-  const visibleGroups = NAV_GROUPS.filter((group) => (
-    (group.id !== 'production-group' || processingEnabled)
-    && group.pages.some((item) => canView(moduleForPage(item)))
-  ))
+  const topLink = (id: Page, label: string, iconClass: string) => (
+    <button key={id} type="button" className={page === id ? 'active' : ''} onClick={() => setPage(id)}>
+      <span className={`nav-icon ${iconClass}`} aria-hidden="true" />
+      {label}
+    </button>
+  )
 
   return (
     <aside className="sidebar">
@@ -171,63 +132,32 @@ export function Sidebar({ page, setPage, onNewEntry, processingEnabled = false }
       </div>
 
       <nav className="nav">
-        {/* Dashboard */}
-        {canView('dashboard') && dashPage && (
-          <button
-            key="dashboard"
-            className={page === 'dashboard' ? 'active' : ''}
-            onClick={() => setPage('dashboard')}
-            type="button"
-          >
-            <span className={`nav-icon ${dashPage.icon}`} aria-hidden="true" />
-            {dashPage.label}
-          </button>
-        )}
+        {canView('dashboard') && topLink('dashboard', 'Dashboard', 'grid')}
+        {isSystemAdminRole(user?.role) && topLink('system-admin', 'System Admin', 'gear')}
 
-        {isSystemAdminRole(user?.role) && (
-          <button
-            type="button"
-            className={page === 'system-admin' ? 'active' : ''}
-            onClick={() => setPage('system-admin')}
-          >
-            <span className="nav-icon gear" aria-hidden="true" />
-            System Admin
-          </button>
-        )}
-
-        {processingEnabled && canView('quality') && <button type="button" className={page === 'quality-control' ? 'active' : ''} onClick={() => setPage('quality-control')}>
-          <span className="nav-icon box" aria-hidden="true" />
-          Quality Control
-        </button>}
-
-        {/* 4 Accordion Groups: Inventory, Purchases, Sales, Expenses */}
         {visibleGroups.map((group) => {
-          const isOpen = Boolean(openGroups[group.id])
-          const isActive = group.pages.includes(page)
-
+          const isOpen = openGroupId === group.id
           return (
             <div key={group.id} className="nav-group-container">
               <button
-                className={`nav-group-toggle ${isActive ? 'active' : ''}`}
+                className={`nav-group-toggle ${group.pages.includes(page) ? 'active' : ''}`}
                 onClick={() => toggleGroup(group)}
                 type="button"
+                aria-expanded={isOpen}
               >
                 <span className={`nav-icon ${group.iconClass}`} aria-hidden="true" />
                 {group.label}
-                <span className="nav-caret" style={{ marginLeft: 'auto', fontSize: '0.7rem' }}>
-                  {isOpen ? '▾' : '▸'}
-                </span>
+                <span className="nav-caret" aria-hidden="true">{isOpen ? '▾' : '▸'}</span>
               </button>
               {isOpen && (
                 <div className="nav-sub-group">
-                  {group.items.filter((item) => canView(moduleForPage(item.id))).map((item) => (
+                  {visibleItems(group).map((item) => (
                     <button
                       key={item.id}
                       className={`nav-sub-item ${page === item.id ? 'active' : ''}`}
                       onClick={() => setPage(item.id)}
                       type="button"
                     >
-                      <span style={{ marginRight: '0.5rem' }}>{item.icon}</span>
                       {item.label}
                     </button>
                   ))}
@@ -237,85 +167,24 @@ export function Sidebar({ page, setPage, onNewEntry, processingEnabled = false }
           )
         })}
 
-        {/* Top-level Reports */}
-        {canView('reports') && reportsPage && (
-          <button
-            key="reports"
-            className={page === 'reports' ? 'active' : ''}
-            onClick={() => setPage('reports')}
-            type="button"
-          >
-            <span className={`nav-icon ${reportsPage.icon}`} aria-hidden="true" />
-            {reportsPage.label}
-          </button>
-        )}
-
-        {/* Top-level Settings */}
-        {canView('settings') && settingsPage && (
-          <button
-            key="settings"
-            className={page === 'settings' ? 'active' : ''}
-            onClick={() => setPage('settings')}
-            type="button"
-          >
-            <span className={`nav-icon ${settingsPage.icon}`} aria-hidden="true" />
-            {settingsPage.label}
-          </button>
-        )}
+        {canView('reports') && topLink('reports', 'Reports', 'doc')}
+        {canView('settings') && topLink('settings', 'Settings', 'gear')}
       </nav>
 
-      <div className="sidebar-footer" style={{ marginTop: 'auto', paddingTop: '1rem', borderTop: '1px solid var(--line)' }}>
-        {isAuthenticated && user && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem', padding: '0 0.25rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
-              <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'linear-gradient(135deg, #3b82f6, #6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 'bold', color: '#fff', flexShrink: 0 }}>
-                {user.username.slice(0, 2).toUpperCase()}
-              </div>
-              <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-strong, #fff)' }}>{user.username}</div>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted, #94a3b8)' }}>{user.role}</div>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => { logout(); setPage('landing') }}
-              title="Sign Out"
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', fontSize: '15px' }}
-            >
-              🚪
-            </button>
+      <div className="sidebar-footer">
+        {(canAccess(user, 'purchases', 'create') || canAccess(user, 'sales', 'create')) && (
+          <button className="new-entry" type="button" onClick={onNewEntry}>
+            <span aria-hidden="true">+</span> New entry
+          </button>
+        )}
+        {user && (
+          <div className="sidebar-user">
+            <span className="sidebar-avatar" aria-hidden="true">{user.username.slice(0, 2).toUpperCase()}</span>
+            <span className="sidebar-user-text"><strong>{user.username}</strong><small>{user.role.replace(/_/g, ' ')}</small></span>
+            <button type="button" className="sidebar-signout" onClick={() => { logout(); setPage('landing') }} title="Sign out" aria-label="Sign out">⏻</button>
           </div>
         )}
-        <button
-          type="button"
-          onClick={() => setPage('landing')}
-          style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '8px', padding: '8px', borderRadius: '6px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--line)', color: 'var(--text-muted, #94a3b8)', cursor: 'pointer', fontSize: '12px', marginBottom: '8px' }}
-        >
-          <span>🏠</span> Home / Landing
-        </button>
-        {canView('purchases') || canView('sales') ? <button className="new-entry" type="button" onClick={onNewEntry}>
-          <span aria-hidden="true">+</span> New Entry
-        </button> : null}
       </div>
     </aside>
   )
-}
-
-function isSystemAdminRole(role?: string) {
-  return String(role || '').trim().toLowerCase().replace(/[\s-]+/g, '_') === 'system_admin'
-}
-
-function moduleForPage(page: Page) {
-  if (page === 'organization') return 'organization'
-  if (page === 'shop-users' || page === 'access-control') return 'users'
-  if (page === 'quality-control') return 'quality'
-  if (['inventory', 'inventory-control'].includes(page)) return 'inventory'
-  if (['stock-movements', 'stock-adjustments'].includes(page)) return 'stock_movements'
-  if (['purchases', 'purchase-items', 'purchases-report'].includes(page)) return 'purchases'
-  if (['sales', 'sale-items', 'sales-report'].includes(page)) return 'sales'
-  if (['expenses', 'expense-items', 'expenses-report'].includes(page)) return 'expenses'
-  if (['loans', 'loans-given', 'loans-taken', 'loans-repayments'].includes(page)) return 'loans'
-  if (['production', 'production-objectives', 'production-recipes', 'production-processes', 'production-orders', 'production-procurement', 'production-resources', 'production-waste', 'production-pipeline'].includes(page)) return 'production'
-  if (page === 'transfers') return 'transfers'
-  return 'dashboard'
 }

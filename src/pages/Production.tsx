@@ -28,6 +28,14 @@ type ProductionProps = Partial<PageRenderProps> & {
 
 type Notice = { tone: 'success' | 'error'; text: string }
 
+const matchesProductionSearch = (value: unknown, query: string): boolean => {
+  if (typeof value === 'string') return value.toLocaleLowerCase().startsWith(query)
+  if (typeof value === 'number') return String(value).startsWith(query)
+  if (Array.isArray(value)) return value.some((item) => matchesProductionSearch(item, query))
+  if (value && typeof value === 'object') return Object.values(value).some((item) => matchesProductionSearch(item, query))
+  return false
+}
+
 const EMPTY_CONFIGURATION: ProductionConfiguration = {
   units: ['piece', 'kg', 'litre', 'hour', 'batch'],
   conversions: [],
@@ -74,6 +82,7 @@ export function Production({ tab = 'planner', setPage, theme = 'dark', toggleThe
   const [showProcessModal, setShowProcessModal] = useState(false)
   const [qualityOrder, setQualityOrder] = useState<ProductionOrder | null>(null)
   const [executionOrder, setExecutionOrder] = useState<ProductionOrder | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
 
   const refresh = async () => {
     const [overview, operations, waste] = await Promise.all([api.productionOverview(), api.productionOperations(), api.productionWasteRecords()])
@@ -107,6 +116,19 @@ export function Production({ tab = 'planner', setPage, theme = 'dark', toggleThe
       window.clearTimeout(loadTimer)
     }
   }, [])
+
+  const productionSearchQuery = searchQuery.trim().toLocaleLowerCase()
+  const matchingProductionRows = <T,>(rows: T[]) => productionSearchQuery
+    ? rows.filter((row) => matchesProductionSearch(row, productionSearchQuery))
+    : rows
+  const filteredRecipes = matchingProductionRows(recipes)
+  const filteredProcesses = matchingProductionRows(processes)
+  const filteredOrders = matchingProductionRows(orders)
+  const filteredPurchaseRequests = matchingProductionRows(purchaseRequests)
+  const filteredObjectives = matchingProductionRows(objectives)
+  const filteredWasteRecords = matchingProductionRows(wasteRecords)
+  const filteredPurchaseOrders = matchingProductionRows(purchaseOrders)
+  const filteredInventory = matchingProductionRows(inventory)
 
   const selectedRecipe = useMemo(
     () => recipes.find((recipe) => recipe._id === selectedRecipeId) ?? recipes.find((recipe) => recipe.active && recipe.approvalStatus === 'APPROVED'),
@@ -233,7 +255,13 @@ export function Production({ tab = 'planner', setPage, theme = 'dark', toggleThe
 
   return (
     <>
-      <Topbar title="Production Operations" placeholder="Search inventory, sales, reports..." theme={theme} toggleTheme={toggleTheme} />
+      <Topbar
+        title="Production Operations"
+        placeholder="Search this production table..."
+        theme={theme}
+        toggleTheme={toggleTheme}
+        onSearchChange={setSearchQuery}
+      />
       <main className="production-page page-pad">
         <div className="subtabs-bar production-tabs" aria-label="Production navigation">
           {TAB_ROUTES.map((route) => (
@@ -267,8 +295,8 @@ export function Production({ tab = 'planner', setPage, theme = 'dark', toggleThe
           <div className="production-empty">Loading production workspace...</div>
         ) : tab === 'waste' ? (
           <WasteRecordsView
-            records={wasteRecords}
-            inventory={inventory}
+            records={filteredWasteRecords}
+            inventory={filteredInventory}
             onApprove={async (record, payload) => {
               await api.approveProductionWasteRecord(record._id, payload)
               await refresh()
@@ -277,8 +305,8 @@ export function Production({ tab = 'planner', setPage, theme = 'dark', toggleThe
           />
         ) : tab === 'planner' ? (
           <PlannerView
-            recipes={recipes}
-            inventory={inventory}
+            recipes={filteredRecipes}
+            inventory={filteredInventory}
             selectedRecipeId={selectedRecipe?._id || ''}
             targetQuantity={targetQuantity}
             scheduledDate={scheduledDate}
@@ -295,17 +323,17 @@ export function Production({ tab = 'planner', setPage, theme = 'dark', toggleThe
             onCreateRecipe={() => setShowRecipeModal(true)}
           />
         ) : tab === 'objectives' ? (
-          <ObjectivesView recipes={recipes.filter((recipe) => recipe.active && recipe.approvalStatus === 'APPROVED')} objectives={objectives} currency={currency} onRefresh={refresh} onNotice={setNotice} />
+          <ObjectivesView recipes={recipes.filter((recipe) => recipe.active && recipe.approvalStatus === 'APPROVED')} objectives={filteredObjectives} currency={currency} onRefresh={refresh} onNotice={setNotice} />
         ) : tab === 'recipes' ? (
-          <RecipesView recipes={recipes} currency={currency} onCreateRecipe={() => setShowRecipeModal(true)} onApprove={approveRecipe} />
+          <RecipesView recipes={filteredRecipes} currency={currency} onCreateRecipe={() => setShowRecipeModal(true)} onApprove={approveRecipe} />
         ) : tab === 'processes' ? (
-          <ProcessesView processes={processes} onCreateProcess={() => setShowProcessModal(true)} />
+          <ProcessesView processes={filteredProcesses} onCreateProcess={() => setShowProcessModal(true)} />
         ) : tab === 'orders' ? (
-          <OrdersView orders={orders} purchaseRequests={purchaseRequests} currency={currency} onStart={updateOrderStatus} onApprove={approveOrder} onReserve={reserveOrderMaterials} onQuality={setQualityOrder} onExecution={setExecutionOrder} />
+          <OrdersView orders={filteredOrders} purchaseRequests={filteredPurchaseRequests} currency={currency} onStart={updateOrderStatus} onApprove={approveOrder} onReserve={reserveOrderMaterials} onQuality={setQualityOrder} onExecution={setExecutionOrder} />
         ) : tab === 'procurement' ? (
-          <ProcurementView inventory={inventory} purchaseRequests={purchaseRequests} purchaseOrders={purchaseOrders} currency={currency} onRefresh={refresh} onNotice={setNotice} />
+          <ProcurementView inventory={filteredInventory} purchaseRequests={filteredPurchaseRequests} purchaseOrders={filteredPurchaseOrders} currency={currency} onRefresh={refresh} onNotice={setNotice} />
         ) : (
-          <ResourcesView configuration={configuration} currency={currency} onSave={saveConfiguration} />
+          <ResourcesView configuration={configuration} searchQuery={productionSearchQuery} currency={currency} onSave={saveConfiguration} />
         )}
       </main>
 
@@ -370,7 +398,7 @@ function WasteRecordsView({
 }) {
   const [selectedRecord, setSelectedRecord] = useState<ProductionWasteRecord | null>(null)
   const [error, setError] = useState('')
-  return <section className="production-orders"><div className="production-section-head"><h2>Waste and by-product records</h2><span>{records.length} records</span></div>{error && <div className="production-notice error">{error}</div>}{records.length === 0 ? <div className="production-empty compact"><p>No production waste or by-products have been recorded.</p></div> : <div className="table-frame"><table><thead><tr><th>Production order</th><th>Kind</th><th>Quantity</th><th>Reason / notes</th><th>Disposition</th><th>Inventory output</th><th /></tr></thead><tbody>{records.map((record) => <tr key={record._id}><td><strong>{record.productionOrderCode}</strong><small>{record.productName}</small></td><td>{record.kind === 'BYPRODUCT' ? 'By-product' : record.reusable ? 'Reusable waste' : 'Non-reusable waste'}</td><td>{record.quantity} {record.unit}</td><td>{record.reason || record.notes || '-'}</td><td><span className={`production-status ${record.status.toLowerCase()}`}>{formatStatus(record.status)}</span></td><td>{record.inventorySku ? `${record.inventorySku}: ${record.inventoryQuantity} ${record.inventoryUnit}` : '-'}</td><td>{record.status === 'PENDING_APPROVAL' && <button className="primary-action" type="button" onClick={() => { setSelectedRecord(record); setError('') }}>Approve inventory</button>}</td></tr>)}</tbody></table></div>}{selectedRecord && <WasteApprovalModal record={selectedRecord} inventory={inventory} onClose={() => setSelectedRecord(null)} onApprove={async (payload) => { try { await onApprove(selectedRecord, payload); setSelectedRecord(null) } catch (approvalError) { setError(approvalError instanceof Error ? approvalError.message : 'Could not approve this inventory output.') } }} />}</section>
+  return <section className="production-orders"><div className="production-section-head"><h2>Waste and by-product records</h2><span>{records.length} records</span></div>{error && <div className="production-notice error">{error}</div>}{records.length === 0 ? <div className="production-empty compact"><p>No waste or by-products recorded.</p></div> : <div className="table-frame"><table><thead><tr><th>Production order</th><th>Kind</th><th>Quantity</th><th>Reason / notes</th><th>Disposition</th><th>Inventory output</th><th /></tr></thead><tbody>{records.map((record) => <tr key={record._id}><td><strong>{record.productionOrderCode}</strong><small>{record.productName}</small></td><td>{record.kind === 'BYPRODUCT' ? 'By-product' : record.reusable ? 'Reusable waste' : 'Non-reusable waste'}</td><td>{record.quantity} {record.unit}</td><td>{record.reason || record.notes || '-'}</td><td><span className={`production-status ${record.status.toLowerCase()}`}>{formatStatus(record.status)}</span></td><td>{record.inventorySku ? `${record.inventorySku}: ${record.inventoryQuantity} ${record.inventoryUnit}` : '-'}</td><td>{record.status === 'PENDING_APPROVAL' && <button className="primary-action" type="button" onClick={() => { setSelectedRecord(record); setError('') }}>Approve inventory</button>}</td></tr>)}</tbody></table></div>}{selectedRecord && <WasteApprovalModal record={selectedRecord} inventory={inventory} onClose={() => setSelectedRecord(null)} onApprove={async (payload) => { try { await onApprove(selectedRecord, payload); setSelectedRecord(null) } catch (approvalError) { setError(approvalError instanceof Error ? approvalError.message : 'Could not approve this inventory output.') } }} />}</section>
 }
 
 function WasteApprovalModal({
@@ -445,7 +473,6 @@ function PlannerView({
     return (
       <section className="production-empty">
         <h2>Start with a recipe or bill of materials</h2>
-        <p>Select a product already in Inventory, define its ingredients for one recipe yield, then enter how many you want to produce. The planner scales ingredients and estimates labor, duration, and cost.</p>
         <button className="primary-action" type="button" onClick={onCreateRecipe}>Create recipe</button>
       </section>
     )
@@ -481,7 +508,7 @@ function PlannerView({
       </form>
 
       {!plan ? (
-        <section className="production-empty compact"><p>Choose an inventory product with an approved recipe, enter the quantity to produce, and calculate all ingredient quantities, labor, duration, shortages, and cost. Products marked “approved recipe required” need a recipe in Recipes &amp; BOM before they can be planned.</p></section>
+        <section className="production-empty compact"><p>Pick a product with an approved recipe and a quantity, then calculate.</p></section>
       ) : (
         <section className="production-plan-results">
           <div className="production-summary-grid">
@@ -610,7 +637,7 @@ function ProcessesView({ processes, onCreateProcess }: { processes: ProductionPr
   return (
     <section>
       <div className="production-list-head"><p>{processes.length} reusable production processes</p><button className="primary-action" type="button" onClick={onCreateProcess}>New process</button></div>
-      {processes.length === 0 ? <div className="production-empty compact"><p>No production processes have been configured yet.</p></div> : (
+      {processes.length === 0 ? <div className="production-empty compact"><p>No processes yet.</p></div> : (
         <div className="production-recipe-list">
           {processes.map((process) => <article key={process._id} className="production-recipe-row">
             <div className="production-recipe-title"><strong>{process.name}</strong><span>{process.code}{process.description ? ` - ${process.description}` : ''}</span></div>
@@ -624,7 +651,7 @@ function ProcessesView({ processes, onCreateProcess }: { processes: ProductionPr
 }
 
 function OrdersView({ orders, purchaseRequests, currency, onStart, onApprove, onReserve, onQuality, onExecution }: { orders: ProductionOrder[]; purchaseRequests: PurchaseRequest[]; currency: string; onStart: (order: ProductionOrder, status: ProductionOrder['status']) => void; onApprove: (order: ProductionOrder) => void; onReserve: (order: ProductionOrder) => void; onQuality: (order: ProductionOrder) => void; onExecution: (order: ProductionOrder) => void }) {
-  if (orders.length === 0 && purchaseRequests.length === 0) return <div className="production-empty compact"><p>No production plans or purchase requests yet. Calculate a plan when you are ready to execute.</p></div>
+  if (orders.length === 0 && purchaseRequests.length === 0) return <div className="production-empty compact"><p>No production plans or purchase requests yet.</p></div>
 
   return (
     <section className="production-orders-stack">
@@ -717,7 +744,7 @@ function ObjectivesView({ recipes, objectives, currency, onRefresh, onNotice }: 
     }
   }
 
-  if (!recipes.length) return <div className="production-empty compact"><p>Approve at least one recipe before calculating a production objective.</p></div>
+  if (!recipes.length) return <div className="production-empty compact"><p>Approve a recipe first.</p></div>
   return <section className="production-orders-stack">
     <form className="production-plan-form" onSubmit={calculate}>
       <label>Objective title<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Weekly bakery output" /></label>
@@ -767,7 +794,7 @@ function ProcurementView({ inventory, purchaseRequests, purchaseOrders, currency
     } catch (error) { onNotice({ tone: 'error', text: error instanceof Error ? error.message : 'Could not create the purchase order.' }) } finally { setSaving(false) }
   }
   const act = async (action: () => Promise<unknown>, success: string) => { try { setSaving(true); await action(); await onRefresh(); onNotice({ tone: 'success', text: success }) } catch (error) { onNotice({ tone: 'error', text: error instanceof Error ? error.message : 'Could not update purchasing.' }) } finally { setSaving(false) } }
-  if (!purchasable.length) return <div className="production-empty compact"><p>Create raw-material, packaging, or consumable inventory items before purchasing.</p></div>
+  if (!purchasable.length) return <div className="production-empty compact"><p>Add raw materials or packaging to inventory first.</p></div>
   return <section className="production-orders-stack">
     <form className="production-plan-form" onSubmit={manualRequest}>
       <label>Item<select value={selectedItem?.sku || ''} onChange={(event) => changeItem(event.target.value)}>{purchasable.map((item) => <option key={item.sku} value={item.sku}>{item.item} ({item.sku})</option>)}</select></label><label>Quantity<input type="number" min="0.01" step="0.01" value={quantity} onChange={(event) => setQuantity(event.target.value)} /></label><label>Unit price ({currency})<input type="number" min="0" step="0.01" value={unitPrice} onChange={(event) => setUnitPrice(event.target.value)} /></label><label>Supplier<input value={supplierName} onChange={(event) => setSupplierName(event.target.value)} placeholder="Supplier name" /></label><label>Required by<input type="date" value={requiredByDate} onChange={(event) => setRequiredByDate(event.target.value)} /></label><label>Reason<input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Production shortage" /></label><button className="primary-action" type="submit" disabled={saving}>Create request</button><button type="button" disabled={saving || !supplierName.trim()} onClick={directOrder}>Create direct PO</button>
@@ -778,7 +805,7 @@ function ProcurementView({ inventory, purchaseRequests, purchaseOrders, currency
   </section>
 }
 
-function ResourcesView({ configuration, currency, onSave }: { configuration: ProductionConfiguration; currency: string; onSave: (configuration: ProductionConfiguration) => Promise<void> }) {
+function ResourcesView({ configuration, searchQuery, currency, onSave }: { configuration: ProductionConfiguration; searchQuery: string; currency: string; onSave: (configuration: ProductionConfiguration) => Promise<void> }) {
   const [draft, setDraft] = useState<ProductionConfiguration>(configuration)
   const [unitDraft, setUnitDraft] = useState('')
   const [saving, setSaving] = useState(false)
@@ -795,19 +822,19 @@ function ResourcesView({ configuration, currency, onSave }: { configuration: Pro
   return (
     <section className="production-resources">
       <div className="production-resource-grid">
-        <ResourceTable title="Production workers" description="Active hourly, daily, or monthly rates and available hours per day are used for automatic labor estimates." rows={draft.workers} columns={[
+        <ResourceTable searchQuery={searchQuery} title="Production workers" description="Active hourly, daily, or monthly rates and available hours per day are used for automatic labor estimates." rows={draft.workers} columns={[
           { key: 'code', label: 'Code' }, { key: 'name', label: 'Name' }, { key: 'role', label: 'Role' }, { key: 'skills', label: 'Skills' }, { key: 'rateType', label: 'Rate method' }, { key: 'hourlyRate', label: `Rate (${currency})`, numeric: true }, { key: 'overtimeRate', label: 'Overtime rate', numeric: true }, { key: 'availableHoursPerDay', label: 'Hours/day', numeric: true },
         ]} onChange={(workers) => setDraft((current) => ({ ...current, workers }))} onAdd={() => setDraft((current) => ({ ...current, workers: [...current.workers, { code: '', name: '', role: '', skills: [], rateType: 'hourly', hourlyRate: 0, overtimeRate: 0, availableHoursPerDay: 8, active: true }] }))} />
-        <ResourceTable title="Equipment" description="Capacity and runtime are included in production plans." rows={draft.machines} columns={[
+        <ResourceTable searchQuery={searchQuery} title="Equipment" description="Capacity and runtime are included in production plans." rows={draft.machines} columns={[
           { key: 'code', label: 'Code' }, { key: 'name', label: 'Name' }, { key: 'machineType', label: 'Type' }, { key: 'costingMethod', label: 'Cost method' }, { key: 'hourlyRate', label: `Rate (${currency})`, numeric: true }, { key: 'purchasePrice', label: 'Purchase cost', numeric: true }, { key: 'usefulLifeYears', label: 'Life (years)', numeric: true }, { key: 'capacityPerHour', label: 'Capacity / hr', numeric: true }, { key: 'operatingHours', label: 'Operating hrs', numeric: true }, { key: 'maintenanceIntervalHours', label: 'Maintain after hrs', numeric: true }, { key: 'status', label: 'Status' },
         ]} onChange={(machines) => setDraft((current) => ({ ...current, machines }))} onAdd={() => setDraft((current) => ({ ...current, machines: [...current.machines, { code: '', name: '', machineType: '', costingMethod: 'hourly', hourlyRate: 0, purchasePrice: 0, usefulLifeYears: 0, capacityPerHour: 0, operatingHours: 0, maintenanceIntervalHours: 0, status: 'Available' }] }))} />
-        <ResourceTable title="Utilities" description="Use these rates for electricity, water, fuel, gas, and similar inputs." rows={draft.utilities} columns={[
+        <ResourceTable searchQuery={searchQuery} title="Utilities" description="Use these rates for electricity, water, fuel, gas, and similar inputs." rows={draft.utilities} columns={[
           { key: 'name', label: 'Utility' }, { key: 'unit', label: 'Unit' }, { key: 'rate', label: `Rate (${currency})`, numeric: true },
         ]} onChange={(utilities) => setDraft((current) => ({ ...current, utilities }))} onAdd={() => setDraft((current) => ({ ...current, utilities: [...current.utilities, { name: '', unit: 'unit', rate: 0 }] }))} />
-        <ResourceTable title="Unit conversions" description="Store a rule as one source unit equals the conversion factor in the target unit." rows={draft.conversions} columns={[
+        <ResourceTable searchQuery={searchQuery} title="Unit conversions" description="Store a rule as one source unit equals the conversion factor in the target unit." rows={draft.conversions} columns={[
           { key: 'fromUnit', label: 'From unit' }, { key: 'toUnit', label: 'To unit' }, { key: 'factor', label: 'Factor', numeric: true },
         ]} onChange={(conversions) => setDraft((current) => ({ ...current, conversions }))} onAdd={() => setDraft((current) => ({ ...current, conversions: [...current.conversions, { fromUnit: '', toUnit: '', factor: 1 }] }))} />
-        <ResourceTable title="Overhead allocation" description="Allocate rent, admin, and other overheads per unit, batch, hour, percentage, or fixed amount." rows={draft.overheadCosts || []} columns={[
+        <ResourceTable searchQuery={searchQuery} title="Overhead allocation" description="Allocate rent, admin, and other overheads per unit, batch, hour, percentage, or fixed amount." rows={draft.overheadCosts || []} columns={[
           { key: 'name', label: 'Cost name' }, { key: 'amount', label: `Amount (${currency})`, numeric: true }, { key: 'allocationMethod', label: 'Allocation method' },
         ]} onChange={(overheadCosts) => setDraft((current) => ({ ...current, overheadCosts }))} onAdd={() => setDraft((current) => ({ ...current, overheadCosts: [...(current.overheadCosts || []), { name: '', amount: 0, allocationMethod: 'per_unit', active: true }] }))} />
       </div>
@@ -838,7 +865,8 @@ function ResourcesView({ configuration, currency, onSave }: { configuration: Pro
   )
 }
 
-function ResourceTable<T extends object>({ title, description, rows, columns, onChange, onAdd }: {
+function ResourceTable<T extends object>({ searchQuery, title, description, rows, columns, onChange, onAdd }: {
+  searchQuery: string
   title: string
   description: string
   rows: T[]
@@ -846,6 +874,7 @@ function ResourceTable<T extends object>({ title, description, rows, columns, on
   onChange: (rows: T[]) => void
   onAdd: () => void
 }) {
+  const filteredRows = searchQuery ? rows.filter((row) => matchesProductionSearch(row, searchQuery)) : rows
   const update = (rowIndex: number, key: keyof T, value: string, numeric?: boolean) => {
     onChange(rows.map((row, index) => index === rowIndex ? { ...row, [key]: numeric ? Number(value) : value } as T : row))
   }
@@ -856,10 +885,10 @@ function ResourceTable<T extends object>({ title, description, rows, columns, on
         <table>
           <thead><tr>{columns.map((column) => <th key={String(column.key)}>{column.label}</th>)}<th aria-label="Remove row" /></tr></thead>
           <tbody>
-            {rows.length === 0 ? <tr><td colSpan={columns.length + 1} className="production-empty-cell">Nothing configured.</td></tr> : rows.map((row, rowIndex) => (
-              <tr key={rowIndex}>
-                {columns.map((column) => <td key={String(column.key)}><input type={column.numeric ? 'number' : 'text'} min={column.numeric ? '0' : undefined} step={column.numeric ? '0.01' : undefined} value={String(row[column.key] ?? '')} onChange={(event) => update(rowIndex, column.key, event.target.value, column.numeric)} /></td>)}
-                <td><button type="button" className="production-remove-row" aria-label={`Remove ${title} row`} onClick={() => onChange(rows.filter((_, index) => index !== rowIndex))}>Remove</button></td>
+            {filteredRows.length === 0 ? <tr><td colSpan={columns.length + 1} className="production-empty-cell">{searchQuery ? 'No matching resource records.' : 'Nothing configured.'}</td></tr> : filteredRows.map((row) => (
+              <tr key={rows.indexOf(row)}>
+                {columns.map((column) => <td key={String(column.key)}><input type={column.numeric ? 'number' : 'text'} min={column.numeric ? '0' : undefined} step={column.numeric ? '0.01' : undefined} value={String(row[column.key] ?? '')} onChange={(event) => update(rows.indexOf(row), column.key, event.target.value, column.numeric)} /></td>)}
+                <td><button type="button" className="production-remove-row" aria-label={`Remove ${title} row`} onClick={() => onChange(rows.filter((candidate) => candidate !== row))}>Remove</button></td>
               </tr>
             ))}
           </tbody>
@@ -928,7 +957,7 @@ function RecipeModal({ inventory, configuration, processes, currency, onClose, o
   return (
     <div className="modal-backdrop" role="presentation">
       <form className="entry-modal production-recipe-modal" onSubmit={submit}>
-        <div className="detail-head"><div><h2>New recipe / bill of materials</h2><p>Define one standard production batch. The planner scales it to any target.</p></div><button type="button" aria-label="Close" onClick={onClose}>x</button></div>
+        <div className="detail-head"><div><h2>New recipe / bill of materials</h2></div><button type="button" aria-label="Close" onClick={onClose}>x</button></div>
         {error && <div className="production-notice error">{error}</div>}
         <div className="field-grid">
           <label>Product from inventory<select value={finishedProductSku || '__new__'} onChange={(event) => {
@@ -968,11 +997,11 @@ function RecipeMaterials({ materials, inventory, units = [], onChange, onAdd, on
   }
   const updateSubstituteQuantity = (index: number, value: string) => onChange(materials.map((material, materialIndex) => materialIndex === index ? { ...material, substitutes: (material.substitutes || []).map((substitute) => ({ ...substitute, quantity: Number(value) })) } : material))
   const availableUnits = Array.from(new Set([...units, 'piece', 'kg', 'litre', 'g', 'ml', 'unit']))
-  return <section className="production-modal-section"><div className="production-section-head"><div><h3>Materials, packaging, and waste allowance</h3><p className="production-helper">Define quantities for this recipe yield once; the planner scales them to the requested output.</p></div><button type="button" onClick={onAdd}>Add material</button></div>{inventory.length === 0 && <p className="production-helper">Create raw-material or packaging inventory items before selecting recipe materials.</p>}{materials.map((material, index) => <div className="production-material-row" key={`${material.sku}-${index}`}><div className="production-form-row"><select value={material.sku} onChange={(event) => onSelect(index, event.target.value)} aria-label="Material" disabled={inventory.length === 0} required><option value="">{inventory.length ? 'Select material' : 'No inventory materials available'}</option>{inventory.map((item) => <option value={item.sku} key={item.sku}>{item.item}</option>)}</select><input type="number" min="0.0001" step="0.0001" value={material.quantity} aria-label="Required quantity" placeholder="Amount" onChange={(event) => update(index, 'quantity', event.target.value)} /><select value={material.unit} aria-label="Unit" onChange={(event) => update(index, 'unit', event.target.value)}>{!availableUnits.includes(material.unit) && material.unit && <option value={material.unit}>{material.unit}</option>}{availableUnits.map((u) => <option key={u} value={u}>{u}</option>)}</select><input type="number" min="0" max="100" step="0.01" value={material.wastePercent || 0} aria-label="Expected material waste percentage" placeholder="Waste %" title="Expected material waste percentage" onChange={(event) => update(index, 'wastePercent', event.target.value)} /><button type="button" className="production-remove-row" onClick={() => onChange(materials.filter((_, materialIndex) => materialIndex !== index))}>Remove</button></div><div className="production-substitute-row"><label>Requirement type<select value={material.materialType || 'material'} onChange={(event) => update(index, 'materialType', event.target.value)}><option value="material">Material</option><option value="packaging">Packaging</option></select></label><label>Substitute material<select value={material.substitutes?.[0]?.sku || ''} onChange={(event) => updateSubstitute(index, event.target.value)}><option value="">No substitute</option>{inventory.filter((item) => item.sku !== material.sku).map((item) => <option value={item.sku} key={item.sku}>{item.item}</option>)}</select></label>{material.substitutes?.[0] && <label>Substitute quantity<input type="number" min="0.0001" step="0.0001" value={material.substitutes[0].quantity} onChange={(event) => updateSubstituteQuantity(index, event.target.value)} /></label>}</div></div>)}</section>
+  return <section className="production-modal-section"><div className="production-section-head"><div><h3>Materials, packaging, and waste allowance</h3></div><button type="button" onClick={onAdd}>Add material</button></div>{inventory.length === 0 && <p className="empty-state">Add raw materials or packaging to inventory first.</p>}{materials.map((material, index) => <div className="production-material-row" key={`${material.sku}-${index}`}><div className="production-form-row"><select value={material.sku} onChange={(event) => onSelect(index, event.target.value)} aria-label="Material" disabled={inventory.length === 0} required><option value="">{inventory.length ? 'Select material' : 'No inventory materials available'}</option>{inventory.map((item) => <option value={item.sku} key={item.sku}>{item.item}</option>)}</select><input type="number" min="0.0001" step="0.0001" value={material.quantity} aria-label="Required quantity" placeholder="Amount" onChange={(event) => update(index, 'quantity', event.target.value)} /><select value={material.unit} aria-label="Unit" onChange={(event) => update(index, 'unit', event.target.value)}>{!availableUnits.includes(material.unit) && material.unit && <option value={material.unit}>{material.unit}</option>}{availableUnits.map((u) => <option key={u} value={u}>{u}</option>)}</select><input type="number" min="0" max="100" step="0.01" value={material.wastePercent || 0} aria-label="Expected material waste percentage" placeholder="Waste %" title="Expected material waste percentage" onChange={(event) => update(index, 'wastePercent', event.target.value)} /><button type="button" className="production-remove-row" onClick={() => onChange(materials.filter((_, materialIndex) => materialIndex !== index))}>Remove</button></div><div className="production-substitute-row"><label>Requirement type<select value={material.materialType || 'material'} onChange={(event) => update(index, 'materialType', event.target.value)}><option value="material">Material</option><option value="packaging">Packaging</option></select></label><label>Substitute material<select value={material.substitutes?.[0]?.sku || ''} onChange={(event) => updateSubstitute(index, event.target.value)}><option value="">No substitute</option>{inventory.filter((item) => item.sku !== material.sku).map((item) => <option value={item.sku} key={item.sku}>{item.item}</option>)}</select></label>{material.substitutes?.[0] && <label>Substitute quantity<input type="number" min="0.0001" step="0.0001" value={material.substitutes[0].quantity} onChange={(event) => updateSubstituteQuantity(index, event.target.value)} /></label>}</div></div>)}</section>
 }
 
 function RecipeAssignments({ title, resources, values, onChange }: { title: string; resources: string[]; values: ProductionResourceAssignment[]; onChange: (values: ProductionResourceAssignment[]) => void }) {
-  if (resources.length === 0) return <section className="production-modal-section"><h3>{title}</h3><p className="production-helper">Add resources and rates in Resources & Cost to include this in production costing.</p></section>
+  if (resources.length === 0) return <section className="production-modal-section"><h3>{title}</h3></section>
   return <section className="production-modal-section"><h3>{title}</h3><div className="production-assignment-grid">{resources.map((name) => { const assignment = values.find((value) => value.name === name); return <label key={name}><span><input type="checkbox" checked={Boolean(assignment)} onChange={(event) => onChange(event.target.checked ? [...values, { name, hoursPerBatch: 1 }] : values.filter((value) => value.name !== name))} /> {name}</span>{assignment && <input type="number" min="0.01" step="0.01" value={assignment.hoursPerBatch} onChange={(event) => onChange(values.map((value) => value.name === name ? { ...value, hoursPerBatch: Number(event.target.value) } : value))} />}</label> })}</div></section>
 }
 
@@ -983,7 +1012,7 @@ function UtilityAssignments({ resources, values, onChange }: { resources: string
 
 function RecipeSteps({ steps, onChange }: { steps: Array<{ name: string; durationHours: number; capacityPerHour: number; instructions: string; qualityCheck: string }>; onChange: (steps: Array<{ name: string; durationHours: number; capacityPerHour: number; instructions: string; qualityCheck: string }>) => void }) {
   const update = (index: number, field: 'name' | 'durationHours' | 'capacityPerHour' | 'instructions' | 'qualityCheck', value: string) => onChange(steps.map((step, stepIndex) => stepIndex === index ? { ...step, [field]: field === 'durationHours' || field === 'capacityPerHour' ? Number(value) : value } : step))
-  return <section className="production-modal-section"><div className="production-section-head"><div><h3>Process steps</h3><p className="production-helper">Set output units per worker-hour to estimate labor-hours and workers needed for a shift.</p></div><button type="button" onClick={() => onChange([...steps, { name: '', durationHours: 0, capacityPerHour: 0, instructions: '', qualityCheck: '' }])}>Add step</button></div>{steps.map((step, index) => <div className="production-step-row" key={index}><input value={step.name} placeholder="Step name" onChange={(event) => update(index, 'name', event.target.value)} /><input type="number" min="0" step="0.01" value={step.durationHours} placeholder="Fallback hours / batch" aria-label="Fallback hours per batch" onChange={(event) => update(index, 'durationHours', event.target.value)} /><input type="number" min="0" step="0.01" value={step.capacityPerHour || 0} placeholder="Units / worker-hour" aria-label="Finished units per worker-hour" onChange={(event) => update(index, 'capacityPerHour', event.target.value)} /><input value={step.qualityCheck} placeholder="Quality check" onChange={(event) => update(index, 'qualityCheck', event.target.value)} /><button type="button" className="production-remove-row" onClick={() => onChange(steps.filter((_, stepIndex) => stepIndex !== index))}>Remove</button></div>)}</section>
+  return <section className="production-modal-section"><div className="production-section-head"><div><h3>Process steps</h3></div><button type="button" onClick={() => onChange([...steps, { name: '', durationHours: 0, capacityPerHour: 0, instructions: '', qualityCheck: '' }])}>Add step</button></div>{steps.map((step, index) => <div className="production-step-row" key={index}><input value={step.name} placeholder="Step name" onChange={(event) => update(index, 'name', event.target.value)} /><input type="number" min="0" step="0.01" value={step.durationHours} placeholder="Fallback hours / batch" aria-label="Fallback hours per batch" onChange={(event) => update(index, 'durationHours', event.target.value)} /><input type="number" min="0" step="0.01" value={step.capacityPerHour || 0} placeholder="Units / worker-hour" aria-label="Finished units per worker-hour" onChange={(event) => update(index, 'capacityPerHour', event.target.value)} /><input value={step.qualityCheck} placeholder="Quality check" onChange={(event) => update(index, 'qualityCheck', event.target.value)} /><button type="button" className="production-remove-row" onClick={() => onChange(steps.filter((_, stepIndex) => stepIndex !== index))}>Remove</button></div>)}</section>
 }
 
 function ProcessModal({ inventory, configuration, onClose, onSave }: { inventory: Array<{ sku: string; item: string; category: string; baseUnit?: string; itemType?: string }>; configuration: ProductionConfiguration; onClose: () => void; onSave: (process: Omit<ProductionProcess, '_id'>) => Promise<void> }) {
@@ -1011,7 +1040,7 @@ function ProcessModal({ inventory, configuration, onClose, onSave }: { inventory
       setError(saveError instanceof Error ? saveError.message : 'Could not save the process.')
     } finally { setSaving(false) }
   }
-  return <div className="modal-backdrop" role="presentation"><form className="entry-modal production-recipe-modal" onSubmit={submit}><div className="detail-head"><div><h2>New production process</h2><p>Set process steps and output units per worker-hour to estimate labor for the requested quantity.</p></div><button type="button" aria-label="Close" onClick={onClose}>x</button></div>{error && <div className="production-notice error">{error}</div>}<div className="field-grid"><label>Process name<input required value={name} onChange={(event) => setName(event.target.value)} /></label><label>Process code<input value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} /></label><label className="production-full-width">Description<input value={description} onChange={(event) => setDescription(event.target.value)} /></label></div><section className="production-modal-section"><div className="production-section-head"><div><h3>Sequenced steps</h3><p className="production-helper">Capacity is finished units per worker-hour. If omitted, fallback hours per batch are used.</p></div><button type="button" onClick={() => setSteps((current) => [...current, { sequence: current.length + 1, name: '', durationHours: 0, capacityPerHour: 0, description: '', instructions: '', qualityCheck: '', materials: [], expectedOutputQuantity: 0, expectedWastePercent: 0, optional: false, reworkAllowed: false }])}>Add step</button></div>{steps.map((step, index) => <div className="production-process-step" key={index}><div className="production-form-row"><input value={step.name} placeholder="Step name" onChange={(event) => updateStep(index, 'name', event.target.value)} /><input type="number" min="0" step="0.01" value={step.durationHours} aria-label="Fallback hours per batch" placeholder="Fallback hours / batch" onChange={(event) => updateStep(index, 'durationHours', event.target.value)} /><input type="number" min="0" step="0.01" value={step.capacityPerHour || 0} aria-label="Finished units per worker-hour" placeholder="Units / worker-hour" onChange={(event) => updateStep(index, 'capacityPerHour', event.target.value)} /><button type="button" className="production-remove-row" onClick={() => setSteps((current) => current.filter((_, stepIndex) => stepIndex !== index))}>Remove</button></div><div className="production-form-row"><select value={step.materials?.[0]?.sku || ''} onChange={(event) => selectStepMaterial(index, event.target.value)}><option value="">No step material</option>{materialInventory.map((item) => <option key={item.sku} value={item.sku}>{item.item}</option>)}</select><input type="number" min="0.0001" step="0.0001" disabled={!step.materials?.[0]} value={step.materials?.[0]?.quantity || 0} aria-label="Step material quantity" onChange={(event) => updateStepMaterialQuantity(index, event.target.value)} /><input value={step.qualityCheck || ''} placeholder="Quality check" onChange={(event) => updateStep(index, 'qualityCheck', event.target.value)} /><input value={step.instructions || ''} placeholder="Work instructions" onChange={(event) => updateStep(index, 'instructions', event.target.value)} /></div><div className="production-process-resources"><label>Equipment<select multiple value={(step.machines || []).map((row) => row.name)} onChange={(event) => selectResources(index, 'machines', Array.from(event.target.selectedOptions, (option) => option.value))}>{configuration.machines.map((machine) => <option key={machine.name} value={machine.name}>{machine.name}</option>)}</select></label><label>Utilities<select multiple value={(step.utilities || []).map((row) => row.name)} onChange={(event) => selectResources(index, 'utilities', Array.from(event.target.selectedOptions, (option) => option.value))}>{configuration.utilities.map((utility) => <option key={utility.name} value={utility.name}>{utility.name}</option>)}</select></label><label>Expected output<input type="number" min="0" step="0.01" value={step.expectedOutputQuantity || 0} onChange={(event) => setSteps((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, expectedOutputQuantity: Number(event.target.value) } : row))} /></label><label>Expected waste (%)<input type="number" min="0" step="0.01" value={step.expectedWastePercent || 0} onChange={(event) => setSteps((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, expectedWastePercent: Number(event.target.value) } : row))} /></label><label className="production-inline-check"><input type="checkbox" checked={Boolean(step.optional)} onChange={(event) => updateStep(index, 'optional', event.target.checked)} />Optional</label><label className="production-inline-check"><input type="checkbox" checked={Boolean(step.reworkAllowed)} onChange={(event) => updateStep(index, 'reworkAllowed', event.target.checked)} />Rework</label></div></div>)}</section><div className="modal-actions"><button type="button" onClick={onClose}>Cancel</button><button className="primary-action" type="submit" disabled={saving}>{saving ? 'Saving...' : 'Save process'}</button></div></form></div>
+  return <div className="modal-backdrop" role="presentation"><form className="entry-modal production-recipe-modal" onSubmit={submit}><div className="detail-head"><div><h2>New production process</h2></div><button type="button" aria-label="Close" onClick={onClose}>x</button></div>{error && <div className="production-notice error">{error}</div>}<div className="field-grid"><label>Process name<input required value={name} onChange={(event) => setName(event.target.value)} /></label><label>Process code<input value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} /></label><label className="production-full-width">Description<input value={description} onChange={(event) => setDescription(event.target.value)} /></label></div><section className="production-modal-section"><div className="production-section-head"><div><h3>Sequenced steps</h3></div><button type="button" onClick={() => setSteps((current) => [...current, { sequence: current.length + 1, name: '', durationHours: 0, capacityPerHour: 0, description: '', instructions: '', qualityCheck: '', materials: [], expectedOutputQuantity: 0, expectedWastePercent: 0, optional: false, reworkAllowed: false }])}>Add step</button></div>{steps.map((step, index) => <div className="production-process-step" key={index}><div className="production-form-row"><input value={step.name} placeholder="Step name" onChange={(event) => updateStep(index, 'name', event.target.value)} /><input type="number" min="0" step="0.01" value={step.durationHours} aria-label="Fallback hours per batch" placeholder="Fallback hours / batch" onChange={(event) => updateStep(index, 'durationHours', event.target.value)} /><input type="number" min="0" step="0.01" value={step.capacityPerHour || 0} aria-label="Finished units per worker-hour" placeholder="Units / worker-hour" onChange={(event) => updateStep(index, 'capacityPerHour', event.target.value)} /><button type="button" className="production-remove-row" onClick={() => setSteps((current) => current.filter((_, stepIndex) => stepIndex !== index))}>Remove</button></div><div className="production-form-row"><select value={step.materials?.[0]?.sku || ''} onChange={(event) => selectStepMaterial(index, event.target.value)}><option value="">No step material</option>{materialInventory.map((item) => <option key={item.sku} value={item.sku}>{item.item}</option>)}</select><input type="number" min="0.0001" step="0.0001" disabled={!step.materials?.[0]} value={step.materials?.[0]?.quantity || 0} aria-label="Step material quantity" onChange={(event) => updateStepMaterialQuantity(index, event.target.value)} /><input value={step.qualityCheck || ''} placeholder="Quality check" onChange={(event) => updateStep(index, 'qualityCheck', event.target.value)} /><input value={step.instructions || ''} placeholder="Work instructions" onChange={(event) => updateStep(index, 'instructions', event.target.value)} /></div><div className="production-process-resources"><label>Equipment<select multiple value={(step.machines || []).map((row) => row.name)} onChange={(event) => selectResources(index, 'machines', Array.from(event.target.selectedOptions, (option) => option.value))}>{configuration.machines.map((machine) => <option key={machine.name} value={machine.name}>{machine.name}</option>)}</select></label><label>Utilities<select multiple value={(step.utilities || []).map((row) => row.name)} onChange={(event) => selectResources(index, 'utilities', Array.from(event.target.selectedOptions, (option) => option.value))}>{configuration.utilities.map((utility) => <option key={utility.name} value={utility.name}>{utility.name}</option>)}</select></label><label>Expected output<input type="number" min="0" step="0.01" value={step.expectedOutputQuantity || 0} onChange={(event) => setSteps((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, expectedOutputQuantity: Number(event.target.value) } : row))} /></label><label>Expected waste (%)<input type="number" min="0" step="0.01" value={step.expectedWastePercent || 0} onChange={(event) => setSteps((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, expectedWastePercent: Number(event.target.value) } : row))} /></label><label className="production-inline-check"><input type="checkbox" checked={Boolean(step.optional)} onChange={(event) => updateStep(index, 'optional', event.target.checked)} />Optional</label><label className="production-inline-check"><input type="checkbox" checked={Boolean(step.reworkAllowed)} onChange={(event) => updateStep(index, 'reworkAllowed', event.target.checked)} />Rework</label></div></div>)}</section><div className="modal-actions"><button type="button" onClick={onClose}>Cancel</button><button className="primary-action" type="submit" disabled={saving}>{saving ? 'Saving...' : 'Save process'}</button></div></form></div>
 }
 
 function ReceiptModal({ order, onClose, onSave }: { order: PurchaseOrder; onClose: () => void; onSave: (payload: { date?: string; receipts: Array<{ sku: string; acceptedQuantity: number; damagedQuantity?: number; rejectedQuantity?: number; unit?: string; unitPrice?: number; batchNumber?: string; expiryDate?: string }> }) => Promise<void> }) {

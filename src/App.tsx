@@ -7,7 +7,10 @@ import { pageRegistry } from './pages'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { GLOBAL_SEARCH_NAVIGATION_EVENT } from './types'
 import type { EntryMode, EntryType, Page, ReportScope, Theme } from './types'
+import { PRODUCTION_PAGES, canAccess, isProcessingFeaturePage, isSystemAdminRole, moduleForPage, normalizedRole } from './utils/access'
 import './App.css'
+
+const THEME_STORAGE_KEY = 'tri_theme'
 
 function AppContent() {
   const { isAuthenticated, loading, user } = useAuth()
@@ -19,7 +22,13 @@ function AppContent() {
     const hasToken = localStorage.getItem('tri_ltd_auth_token')
     return hasToken ? 'dashboard' : 'landing'
   })
-  const [theme, setTheme] = useState<Theme>('dark')
+  const [theme, setTheme] = useState<Theme>(() => {
+    try {
+      return localStorage.getItem(THEME_STORAGE_KEY) === 'light' ? 'light' : 'dark'
+    } catch {
+      return 'dark'
+    }
+  })
   const [currency, setCurrency] = useState('RWF')
   const [isEntryModalOpen, setIsEntryModalOpen] = useState(false)
   const [entryModalType, setEntryModalType] = useState<EntryType | undefined>()
@@ -30,7 +39,7 @@ function AppContent() {
   const [activeShopName, setActiveShopName] = useState(() => localStorage.getItem('tri_system_admin_shop_name') || '')
   const isLight = theme === 'light'
   const isSystemAdmin = isSystemAdminRole(user?.role)
-  const isShopAdmin = String(user?.role || '').trim().toLowerCase() === 'admin'
+  const isShopAdmin = normalizedRole(user?.role) === 'admin'
   const featureScope = `${user?.id || ''}:${isSystemAdmin ? activeShopOwnerKey : 'business'}`
   const businessFeaturesReady = Boolean(isAuthenticated && featureScope && loadedFeatureScope === featureScope)
   const activeProcessingEnabled = businessFeaturesReady && processingEnabled
@@ -38,10 +47,7 @@ function AppContent() {
   const selectedShopAdminPages: Page[] = ['organization', 'quality-control', 'access-control', 'shop-users']
   const systemAdminPages = [...platformAdminPages, ...selectedShopAdminPages]
   const isPublicRoute = page === 'landing' || page === 'login' || page === 'register' || page === 'forgot-password'
-  const canViewPage = (candidate: Page) =>
-    isSystemAdmin
-    || isShopAdmin
-    || Boolean(user?.permissions?.find((permission) => permission.module === moduleForPage(candidate))?.actions.includes('view'))
+  const canViewPage = (candidate: Page) => isSystemAdmin || isShopAdmin || canAccess(user, moduleForPage(candidate))
   const roleSafePage = !isPublicRoute && !canViewPage(page) ? 'dashboard' : page
   const featureSafePage = businessFeaturesReady && !activeProcessingEnabled && isProcessingFeaturePage(roleSafePage)
     ? 'dashboard'
@@ -70,7 +76,7 @@ function AppContent() {
             setProcessingEnabled(false)
             setLoadedFeatureScope(featureScope)
             const reason = error instanceof Error ? ` ${error.message}` : ''
-            setBusinessFeatureError(`Could not determine this business template. Processing features are hidden until the business settings can be loaded.${reason}`)
+            setBusinessFeatureError(`Could not load business settings.${reason}`)
           }
         })
     }
@@ -97,13 +103,29 @@ function AppContent() {
   }, [activeShopOwnerKey, isSystemAdmin])
 
   useEffect(() => {
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, theme)
+    } catch {
+      // Theme still works for this session when storage is unavailable.
+    }
+  }, [theme])
+
+  useEffect(() => {
+    const productionPages = new Set<Page>(PRODUCTION_PAGES)
+
     const navigateToSearchResult = (event: Event) => {
       const result = (event as CustomEvent<GlobalSearchResult>).detail
-      if (result?.page && (!isSystemAdmin || activeShopOwnerKey)) setPage(result.page)
+      if (!result?.page) return
+
+      const isCurrentProductionPage = productionPages.has(page)
+      const isProductionResult = productionPages.has(result.page)
+
+      if (isCurrentProductionPage && !isProductionResult) return
+      if (!isSystemAdmin || activeShopOwnerKey) setPage(result.page)
     }
     window.addEventListener(GLOBAL_SEARCH_NAVIGATION_EVENT, navigateToSearchResult)
     return () => window.removeEventListener(GLOBAL_SEARCH_NAVIGATION_EVENT, navigateToSearchResult)
-  }, [activeShopOwnerKey, isSystemAdmin])
+  }, [activeShopOwnerKey, isSystemAdmin, page])
 
   const toggleTheme = () => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))
 
@@ -196,7 +218,7 @@ function AppContent() {
           processingEnabled={activeProcessingEnabled}
         />
         <section className="workspace">
-          {businessFeatureError && <div role="alert" style={{ padding: '0.75rem 1rem', color: '#b45309', background: '#fffbeb' }}>{businessFeatureError}</div>}
+          {businessFeatureError && <div role="alert" className="notice warning banner">{businessFeatureError}</div>}
           {activePageDef?.render(pageProps)}
         </section>
       </main>
@@ -207,7 +229,7 @@ function AppContent() {
     <main className={`shell ${theme} ${effectivePage === 'reports' ? 'reports-mode' : ''}`}>
       <Sidebar page={effectivePage} setPage={setPage} onNewEntry={() => openEntryModal()} processingEnabled={activeProcessingEnabled} />
       <section className="workspace">
-        {businessFeatureError && <div role="alert" style={{ padding: '0.75rem 1rem', color: '#b45309', background: '#fffbeb' }}>{businessFeatureError}</div>}
+        {businessFeatureError && <div role="alert" className="notice warning banner">{businessFeatureError}</div>}
         {activePageDef?.render(pageProps)}
       </section>
       {isEntryModalOpen && <EntryFlowModal initialType={entryModalType} currency={currency} onClose={closeEntryModal} onSubmit={handleEntrySubmit} />}
@@ -224,30 +246,3 @@ function App() {
 }
 
 export default App
-
-function isSystemAdminRole(role?: string) {
-  return String(role || '').trim().toLowerCase().replace(/[\s-]+/g, '_') === 'system_admin'
-}
-
-function moduleForPage(page: Page) {
-  if (page === 'dashboard') return 'dashboard'
-  if (page === 'organization') return 'organization'
-  if (page === 'shop-users' || page === 'access-control') return 'users'
-  if (page === 'inventory' || page === 'inventory-control') return 'inventory'
-  if (page === 'stock-movements' || page === 'stock-adjustments') return 'stock_movements'
-  if (page === 'purchases' || page === 'purchase-items' || page === 'purchases-report') return 'purchases'
-  if (page === 'sales' || page === 'sale-items' || page === 'sales-report') return 'sales'
-  if (page === 'expenses' || page === 'expense-items' || page === 'expenses-report') return 'expenses'
-  if (page === 'loans' || page === 'loans-given' || page === 'loans-taken' || page === 'loans-repayments') return 'loans'
-  if (page === 'transfers') return 'transfers'
-  if (page === 'quality-control') return 'quality'
-  if (page === 'production' || page === 'production-recipes' || page === 'production-processes' || page === 'production-orders' || page === 'production-resources' || page === 'production-waste' || page === 'production-pipeline') return 'production'
-  if (page === 'reports') return 'reports'
-  if (page === 'settings') return 'settings'
-  return 'dashboard'
-}
-
-function isProcessingFeaturePage(page: Page) {
-  return page === 'quality-control'
-    || ['production', 'production-objectives', 'production-recipes', 'production-processes', 'production-orders', 'production-procurement', 'production-resources', 'production-waste', 'production-pipeline'].includes(page)
-}

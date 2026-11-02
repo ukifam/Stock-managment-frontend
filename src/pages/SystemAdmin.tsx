@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { api, type AdminOverview, type AdminUser, type CreateAdminBusinessPayload, type CreateAdminUserPayload } from '../api'
 import { Topbar } from '../components/Topbar'
-import type { PageDefinition, PageRenderProps } from '../types'
+import type { PageRenderProps } from '../types'
 
 const BUSINESS_TEMPLATES = [
   { value: 'other', label: 'General / Other' },
@@ -18,11 +18,6 @@ const BUSINESS_TEMPLATES = [
   { value: 'agro_processor', label: 'Agro processor' },
 ]
 
-export const page: Pick<PageDefinition, 'id' | 'label' | 'icon'> = {
-  id: 'system-admin',
-  label: 'System Admin',
-  icon: 'gear',
-}
 
 export function SystemAdmin({ theme = 'dark', toggleTheme = () => undefined, page = 'system-admin', setPage, activeShopOwnerKey, activeShopName, onOpenShop }: Partial<PageRenderProps>) {
   const [overview, setOverview] = useState<AdminOverview | null>(null)
@@ -62,6 +57,7 @@ export function SystemAdmin({ theme = 'dark', toggleTheme = () => undefined, pag
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- state is only set after the request resolves
     void loadOverview()
     const interval = window.setInterval(() => { void loadOverview() }, 30000)
     return () => window.clearInterval(interval)
@@ -228,7 +224,7 @@ export function SystemAdmin({ theme = 'dark', toggleTheme = () => undefined, pag
         </section>}
 
         {view === 'shops' && <section className="admin-activity-section">
-          <header className="admin-activity-heading"><div><h2>Registered businesses</h2><p>Create an organization or a business with production and processing enabled.</p></div><button type="button" className="admin-user-create" onClick={() => setIsBusinessFormOpen(true)}>Add business</button></header>
+          <header className="admin-activity-heading"><div><h2>Registered businesses</h2></div><button type="button" className="admin-user-create" onClick={() => setIsBusinessFormOpen(true)}>Add business</button></header>
           <div className="admin-activity-table-wrap"><table className="admin-activity-table">
             <thead><tr><th>Business</th><th>Administrator email</th><th>Template</th><th>Processing</th><th>Users</th><th>Status</th></tr></thead>
             <tbody>{(overview?.shops || []).map((shop) => <tr key={shop.ownerKey} className="admin-shop-row" onClick={() => onOpenShop?.(shop.ownerKey, shop.name)}><td><button type="button" className="admin-shop-link">{shop.name}</button></td><td>{shop.email}</td><td>{formatRole(shop.template)}</td><td><span className={`admin-status ${shop.processingEnabled ? 'positive' : 'neutral'}`}>{shop.processingEnabled ? 'Enabled' : 'Standard'}</span></td><td>{shop.userCount}</td><td><span className={`admin-status ${shop.active ? 'positive' : 'neutral'}`}>{shop.active ? 'Active' : 'Inactive'}</span></td></tr>)}
@@ -238,7 +234,7 @@ export function SystemAdmin({ theme = 'dark', toggleTheme = () => undefined, pag
         </section>}
 
         {view === 'users' && <section className="admin-activity-section">
-          <header className="admin-activity-heading"><div><h2>All users</h2><p>System administrators are kept separate from shop accounts.</p></div><button type="button" className="admin-user-create" onClick={() => setIsUserFormOpen(true)}>Add user</button></header>
+          <header className="admin-activity-heading"><div><h2>All users</h2></div><button type="button" className="admin-user-create" onClick={() => setIsUserFormOpen(true)}>Add user</button></header>
           <div className="admin-activity-table-wrap"><table className="admin-activity-table">
             <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Shop</th><th>Status</th><th>Access</th></tr></thead>
             <tbody>{users.map((user) => <tr key={user.id}><td>{user.username}</td><td>{user.email}</td><td><span className="admin-type-label">{formatRole(user.role)}</span></td><td>{user.shopName}</td><td><span className={`admin-status ${user.active ? 'positive' : 'neutral'}`}>{user.active ? 'Active' : 'Inactive'}</span></td><td>{user.role === 'system_admin' ? <span className="admin-protected">Protected</span> : <div className="shop-user-actions"><button type="button" className="admin-user-action" onClick={() => openEditUser(user)}>Edit</button><button type="button" className="admin-user-action" disabled={updatingUserId === user.id} onClick={() => void toggleUserStatus(user)}>{updatingUserId === user.id ? 'Updating...' : user.active ? 'Deactivate' : 'Activate'}</button></div>}</td></tr>)}
@@ -251,7 +247,6 @@ export function SystemAdmin({ theme = 'dark', toggleTheme = () => undefined, pag
           <header className="admin-activity-heading">
             <div>
               <h2>Recent activity</h2>
-              <p>Latest sales, purchases, expenses, stock movements, loans, and partner transfers.</p>
             </div>
             <div className="admin-activity-filters">
               <label>Area
@@ -297,7 +292,7 @@ export function SystemAdmin({ theme = 'dark', toggleTheme = () => undefined, pag
       </div>
       {isBusinessFormOpen && <div className="modal-backdrop" role="presentation">
         <section className="entry-modal admin-user-modal" role="dialog" aria-modal="true" aria-labelledby="create-business-title">
-          <header className="detail-head"><div><h2 id="create-business-title">Add business</h2><p>Create the organization and its first shop-administrator account.</p></div><button type="button" className="modal-close" onClick={() => setIsBusinessFormOpen(false)} disabled={savingBusiness} aria-label="Close">x</button></header>
+          <header className="detail-head"><div><h2 id="create-business-title">Add business</h2></div><button type="button" className="modal-close" onClick={() => setIsBusinessFormOpen(false)} disabled={savingBusiness} aria-label="Close">x</button></header>
           <form className="admin-user-form" onSubmit={createBusiness}>
             <label className="admin-user-form-wide">Business name<input required value={businessForm.businessName} onChange={(event) => setBusinessForm((current) => ({ ...current, businessName: event.target.value }))} /></label>
             <label>Industry template<select value={businessForm.template} onChange={(event) => setBusinessForm((current) => ({ ...current, template: event.target.value }))}>{BUSINESS_TEMPLATES.map((template) => <option key={template.value} value={template.value}>{template.label}</option>)}</select></label>
@@ -311,7 +306,7 @@ export function SystemAdmin({ theme = 'dark', toggleTheme = () => undefined, pag
       </div>}
       {isUserFormOpen && <div className="modal-backdrop" role="presentation">
         <section className="entry-modal admin-user-modal" role="dialog" aria-modal="true" aria-labelledby="create-user-title">
-          <header className="detail-head"><div><h2 id="create-user-title">Add user account</h2><p>Create a shop administrator or assign staff to a shop.</p></div><button type="button" className="modal-close" onClick={() => setIsUserFormOpen(false)} disabled={savingUser} aria-label="Close">x</button></header>
+          <header className="detail-head"><div><h2 id="create-user-title">Add user account</h2></div><button type="button" className="modal-close" onClick={() => setIsUserFormOpen(false)} disabled={savingUser} aria-label="Close">x</button></header>
           <form className="admin-user-form" onSubmit={createUser}>
             <label>Name<input required value={userForm.username} onChange={(event) => setUserForm((current) => ({ ...current, username: event.target.value }))} /></label>
             <label>Email<input required type="email" value={userForm.email} onChange={(event) => setUserForm((current) => ({ ...current, email: event.target.value }))} /></label>
@@ -324,7 +319,7 @@ export function SystemAdmin({ theme = 'dark', toggleTheme = () => undefined, pag
       </div>}
       {editingUser && <div className="modal-backdrop" role="presentation">
         <section className="entry-modal admin-user-modal" role="dialog" aria-modal="true" aria-labelledby="edit-platform-user-title">
-          <header className="detail-head"><div><h2 id="edit-platform-user-title">Edit user account</h2><p>Leave password blank to keep the existing password.</p></div><button type="button" className="modal-close" onClick={() => setEditingUser(null)} disabled={savingUser} aria-label="Close">x</button></header>
+          <header className="detail-head"><div><h2 id="edit-platform-user-title">Edit user account</h2></div><button type="button" className="modal-close" onClick={() => setEditingUser(null)} disabled={savingUser} aria-label="Close">x</button></header>
           <form className="admin-user-form" onSubmit={saveEditedUser}>
             <label>Name<input required value={editUserForm.username} onChange={(event) => setEditUserForm((current) => ({ ...current, username: event.target.value }))} /></label>
             <label>Email<input required type="email" value={editUserForm.email} onChange={(event) => setEditUserForm((current) => ({ ...current, email: event.target.value }))} /></label>

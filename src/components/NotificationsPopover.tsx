@@ -34,6 +34,7 @@ const CATEGORY_META: Record<NotificationCategory, { icon: string; label: string;
 export function NotificationsPopover() {
   const { user } = useAuth()
   const [isOpen, setIsOpen] = useState(false)
+  const [now, setNow] = useState(() => Date.now())
   const [activeTab, setActiveTab] = useState<'all' | 'unread' | 'alerts'>('all')
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [readIds, setReadIds] = useState<Set<string>>(() => {
@@ -180,19 +181,19 @@ export function NotificationsPopover() {
           }
         }
 
-        // 3. Check Pending Transfers
-        const transfersData = await api.partnerTransfers('PENDING').catch(() => null)
-        if (transfersData?.rows && transfersData.rows.length > 0) {
+        // 3. Stock arriving from other shops
+        const transfersData = await api.shopTransfers('IN_TRANSIT').catch(() => null)
+        if (transfersData && transfersData.incomingCount > 0) {
           generated.push({
-            id: 'pending-transfers-alert',
-            title: `${transfersData.rows.length} Partner Transfer${transfersData.rows.length > 1 ? 's' : ''} Pending`,
-            message: 'You have incoming or outgoing stock transfers awaiting approval or dispatch.',
+            id: 'incoming-transfers-alert',
+            title: `${transfersData.incomingCount} transfer${transfersData.incomingCount > 1 ? 's' : ''} arriving`,
+            message: 'Confirm what arrived to add it to stock.',
             category: 'transfers',
             severity: 'info',
             timestamp: new Date(now.getTime() - 1000 * 60 * 120),
             read: false,
             targetPage: 'transfers',
-            actionLabel: 'Review Transfers',
+            actionLabel: 'Receive',
           })
         }
 
@@ -263,8 +264,14 @@ export function NotificationsPopover() {
     }
   }
 
+  useEffect(() => {
+    if (!isOpen) return
+    const timer = window.setInterval(() => setNow(Date.now()), 60000)
+    return () => window.clearInterval(timer)
+  }, [isOpen])
+
   const formatRelativeTime = (date: Date) => {
-    const diffSeconds = Math.floor((Date.now() - date.getTime()) / 1000)
+    const diffSeconds = Math.floor((now - date.getTime()) / 1000)
     if (diffSeconds < 60) return 'Just now'
     if (diffSeconds < 3600) return `${Math.floor(diffSeconds / 60)}m ago`
     if (diffSeconds < 86400) return `${Math.floor(diffSeconds / 3600)}h ago`
@@ -277,7 +284,7 @@ export function NotificationsPopover() {
       <button
         type="button"
         className={`icon-button notifications-bell-btn ${unreadCount > 0 ? 'has-unread' : ''}`}
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => { setNow(Date.now()); setIsOpen(!isOpen) }}
         aria-label={`Notifications (${unreadCount} unread)`}
         title="Notifications"
         style={{

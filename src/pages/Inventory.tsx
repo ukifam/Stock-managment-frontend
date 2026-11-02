@@ -4,13 +4,14 @@ import { api, type InventoryRow, type InventoryUpdatePayload } from '../api'
 import { Topbar } from '../components/Topbar'
 import { ImportHelp } from '../components/ImportHelp'
 import { PaginationControls } from '../components/PaginationControls'
-import type { PageRenderProps } from '../types'
+import type { Page, PageRenderProps } from '../types'
 
-export const page = { id: 'inventory' as const, label: 'Inventory', icon: 'box' }
 import { exportRows } from '../utils/export'
 import { normalizeCsvRow, parseCsvFile, parseJsonFile } from '../utils/import'
 import { formatMoney } from '../utils/money'
-import { cleanUnitName, formatUnitQty } from './ProductionPipeline'
+import { cleanUnitName, formatUnitQty } from '../utils/units'
+import { readStoredPipelines, writeStoredPipelines, type PipelineStorageScope } from '../utils/pipelineStorage'
+import { useAuth } from '../context/AuthContext'
 
 /* ── Local type mirrors PipelineData (only fields we need) ── */
 type PipelineSummary = {
@@ -27,13 +28,9 @@ type PipelineSummary = {
   scheduledDate: string
 }
 
-const PIPELINE_STORAGE_KEY = 'tri_production_pipelines'
-
-function loadFinishedPipelines(): PipelineSummary[] {
+function loadFinishedPipelines(user?: PipelineStorageScope): PipelineSummary[] {
   try {
-    const raw = localStorage.getItem(PIPELINE_STORAGE_KEY)
-    if (!raw) return []
-    const all: PipelineSummary[] = JSON.parse(raw)
+    const all = readStoredPipelines<PipelineSummary>(user)
     return all.filter(
       (p) =>
         p.producedQuantity > 0 ||
@@ -78,10 +75,12 @@ export function Inventory({ theme = 'dark', toggleTheme = () => {}, setPage }: P
   const totalStockUnits = availableRows.reduce((sum, row) => sum + getStockUnits(row), 0)
   const totalInventoryValue = availableRows.reduce((sum, row) => sum + getStockUnits(row) * getUnitPrice(row), 0)
 
-  useEffect(() => {
+  const [formSku, setFormSku] = useState(selectedRow?.sku)
+  if (formSku !== selectedRow?.sku) {
+    setFormSku(selectedRow?.sku)
     setInventoryForm(inventoryFormFromRow(selectedRow))
     setIsEditing(false)
-  }, [selectedRow?.sku])
+  }
 
   const handleSaveInventory = async () => {
     if (!selectedRow) return
@@ -227,16 +226,23 @@ export function Inventory({ theme = 'dark', toggleTheme = () => {}, setPage }: P
       <div className="inventory-layout">
         <section className="inventory-content page-pad">
           <div className="inventory-title">
-            <div><h1>Inventory Management</h1><p>Real-time status of {totalCount.toLocaleString()} products.</p></div>
+            <div><h1>Products <small className="count-badge">{totalCount.toLocaleString()}</small></h1></div>
             <div className="toolbar">
               <button type="button" onClick={handleExport}>Export</button>
               <button type="button" onClick={() => importInputRef.current?.click()} disabled={isImporting}>
                 {isImporting ? 'Importing…' : 'Import'}
               </button>
               <input ref={importInputRef} type="file" accept=".csv,.json" hidden onChange={handleImportFile} />
+              <ImportHelp kind="inventory" />
             </div>
           </div>
-          <ImportHelp kind="inventory" />
+          <div className="inventory-stats">
+            <div><span>Available Items</span><strong>{availableRows.length}</strong></div>
+            <div><span>Available Stock</span><strong>{totalStockUnits}</strong></div>
+            <div><span>Page Inventory Value</span><strong>{formatMoney(totalInventoryValue)}</strong></div>
+            <div><span>Low Stock</span><strong>{rows.filter((row) => row.status === 'Low').length}</strong></div>
+            <div><span>Out of Stock</span><strong>{rows.filter((row) => row.status.includes('Out')).length}</strong></div>
+          </div>
           <InventoryTable rows={rows} selectedSku={selectedRow?.sku ?? ''} onSelect={setSelectedSku} />
           <PaginationControls
             page={pageNumber}
@@ -247,18 +253,10 @@ export function Inventory({ theme = 'dark', toggleTheme = () => {}, setPage }: P
             onPageSizeChange={(size) => { setPageSize(size); setPageNumber(1) }}
           />
           {importError && (
-            <div style={{ marginTop: '12px', color: importError.startsWith('Imported') ? '#1b5e20' : '#d32f2f' }}>
+            <div className={`notice ${/^(Imported|.*deleted)/i.test(importError) ? 'success' : 'error'}`}>
               {importError}
             </div>
           )}
-          <div className="inventory-stats">
-            <div><span>Available Items</span><strong>{availableRows.length}</strong></div>
-            <div><span>Available Stock</span><strong>{totalStockUnits}</strong></div>
-            <div><span>Page Inventory Value</span><strong>{formatMoney(totalInventoryValue)}</strong></div>
-            <div><span>Low Stock</span><strong>{rows.filter((row) => row.status === 'Low').length}</strong></div>
-            <div><span>Out of Stock</span><strong>{rows.filter((row) => row.status.includes('Out')).length}</strong></div>
-          </div>
-
           {/* Finished Products from Production Pipeline */}
           <FinishedProductsPanel setPage={setPage} />
         </section>
@@ -351,7 +349,7 @@ function DetailPanel({
   onFieldChange: (field: keyof InventoryUpdatePayload, value: string) => void
   onSave: () => Promise<void>
   onDelete: () => void
-  setPage?: (page: any) => void
+  setPage?: (page: Page) => void
 }) {
   return (
     <aside className="detail-panel">
@@ -470,17 +468,18 @@ type QuickSellState = {
   unitPrice: number
 } | null
 
-function FinishedProductsPanel({ setPage }: { setPage?: (page: any) => void }) {
-  const [items, setItems] = useState<PipelineSummary[]>(() => loadFinishedPipelines())
+function FinishedProductsPanel({ setPage }: { setPage?: (page: Page) => void }) {
+  const { user } = useAuth()
+  const [items, setItems] = useState<PipelineSummary[]>(() => loadFinishedPipelines(user))
   const [quickSell, setQuickSell] = useState<QuickSellState>(null)
   const [notice, setNotice] = useState('')
 
   // Reload whenever the window regains focus (user may have just done pipeline work)
   useEffect(() => {
-    const onFocus = () => setItems(loadFinishedPipelines())
+    const onFocus = () => setItems(loadFinishedPipelines(user))
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
-  }, [])
+  }, [user])
 
   useEffect(() => {
     if (notice) {
@@ -513,10 +512,9 @@ function FinishedProductsPanel({ setPage }: { setPage?: (page: any) => void }) {
     const saleDate = new Date().toISOString()
 
     try {
-      const raw = localStorage.getItem(PIPELINE_STORAGE_KEY)
-      if (raw) {
-        const all = JSON.parse(raw)
-        const updated = all.map((p: any) => {
+      const all = readStoredPipelines<PipelineSummary & { id: string }>(user)
+      if (all.length) {
+        const updated = all.map((p) => {
           if (p.id !== pipeline.id) return p
           return {
             ...p,
@@ -527,7 +525,7 @@ function FinishedProductsPanel({ setPage }: { setPage?: (page: any) => void }) {
             updatedAt: saleDate,
           }
         })
-        localStorage.setItem(PIPELINE_STORAGE_KEY, JSON.stringify(updated))
+        writeStoredPipelines(updated, user)
       }
     } catch { /* ignore */ }
 
@@ -536,7 +534,7 @@ function FinishedProductsPanel({ setPage }: { setPage?: (page: any) => void }) {
       id: saleId,
       date: saleDate.slice(0, 10),
       customer: customer || 'Walk-in',
-      payment: (payment as any) || 'Cash',
+      payment: (payment || 'Cash') as 'Cash' | 'Card' | 'Mobile Money' | 'Credit',
       source: 'pipeline',
       allowFlexibleStock: true,
       items: [{
@@ -552,7 +550,7 @@ function FinishedProductsPanel({ setPage }: { setPage?: (page: any) => void }) {
       `Sold ${formatUnitQty(qty, pipeline.singleUnitLabel)} of ${pipeline.productName} for ${formatMoney(qty * unitPrice)}!`,
     )
     setQuickSell(null)
-    setItems(loadFinishedPipelines())
+    setItems(loadFinishedPipelines(user))
   }
 
   return (

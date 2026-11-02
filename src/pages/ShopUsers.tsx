@@ -1,8 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { api, type AccessRole, type ShopRole, type ShopUser } from '../api'
+import { api, type AccessRole, type PermissionAction, type RolePermission, type ShopRole, type ShopUser } from '../api'
+import { PermissionMatrix } from '../components/PermissionMatrix'
 import { Topbar } from '../components/Topbar'
 import type { PageRenderProps, ThemePageProps } from '../types'
 import { useAuth } from '../context/AuthContext'
+import { canAccess, isFullAccessRole } from '../utils/access'
+import { applyOverrides, countPermissions, diffPermissions, hasPermission, pageModules } from '../utils/permissions'
 
 type UserForm = {
   username: string
@@ -11,12 +14,15 @@ type UserForm = {
   shopRole: ShopRole
   accountType: 'admin' | 'staff'
   accessRoleCode: string
+  // null means "exactly what the access role gives".
+  permissions: RolePermission[] | null
 }
 
-const ROLE_GROUPS: Array<{ label: string; icon: string; roles: Array<[ShopRole, string]> }> = [
+type StatusFilter = 'all' | 'admin' | 'staff' | 'inactive'
+
+const JOB_GROUPS: Array<{ label: string; roles: Array<[ShopRole, string]> }> = [
   {
     label: 'Operations',
-    icon: '⚙️',
     roles: [
       ['cashier', 'Cashier'],
       ['storekeeper', 'Storekeeper'],
@@ -28,7 +34,6 @@ const ROLE_GROUPS: Array<{ label: string; icon: string; roles: Array<[ShopRole, 
   },
   {
     label: 'Management',
-    icon: '🏢',
     roles: [
       ['manager', 'Manager'],
       ['store_manager', 'Store Manager'],
@@ -38,10 +43,9 @@ const ROLE_GROUPS: Array<{ label: string; icon: string; roles: Array<[ShopRole, 
   },
   {
     label: 'Sales & Service',
-    icon: '💼',
     roles: [
       ['sales_associate', 'Sales Associate'],
-      ['customer_service_representative', 'Customer Service Representative'],
+      ['customer_service_representative', 'Customer Service'],
       ['stock_clerk', 'Stock Clerk'],
       ['visual_merchandiser', 'Visual Merchandiser'],
       ['loss_prevention_officer', 'Loss Prevention'],
@@ -49,29 +53,38 @@ const ROLE_GROUPS: Array<{ label: string; icon: string; roles: Array<[ShopRole, 
   },
 ]
 
-const ALL_ROLES = ROLE_GROUPS.flatMap((group) => group.roles)
-const roleLabel = (role: ShopRole) => ALL_ROLES.find(([value]) => value === role)?.[1] || role
-const roleGroupOf = (role: ShopRole) => ROLE_GROUPS.find((group) => group.roles.some(([value]) => value === role))
+const JOB_LABELS = new Map(JOB_GROUPS.flatMap((group) => group.roles))
+const jobLabel = (role: ShopRole) => JOB_LABELS.get(role) || role.replace(/_/g, ' ')
 
-const EMPTY_FORM: UserForm = { username: '', email: '', password: '', shopRole: 'cashier', accountType: 'staff', accessRoleCode: 'cashier' }
+const FILTERS: Array<[StatusFilter, string]> = [['all', 'All'], ['admin', 'Admins'], ['staff', 'Staff'], ['inactive', 'Inactive']]
 
-export function ShopUsers({ theme, toggleTheme, setPage }: ThemePageProps & Pick<PageRenderProps, 'setPage'>) {
+const EMPTY_FORM: UserForm = {
+  username: '',
+  email: '',
+  password: '',
+  shopRole: 'cashier',
+  accountType: 'staff',
+  accessRoleCode: 'cashier',
+  permissions: null,
+}
+
+type ShopUsersProps = ThemePageProps & Pick<PageRenderProps, 'setPage' | 'processingEnabled'>
+
+export function ShopUsers({ theme, toggleTheme, setPage, processingEnabled }: ShopUsersProps) {
   const { user } = useAuth()
   const [users, setUsers] = useState<ShopUser[]>([])
   const [roles, setRoles] = useState<AccessRole[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [isFormOpen, setIsFormOpen] = useState(false)
-  const [editingUser, setEditingUser] = useState<ShopUser | null>(null)
-  const [saving, setSaving] = useState(false)
   const [updatingId, setUpdatingId] = useState('')
-  const [searchQ, setSearchQ] = useState('')
-  const [filterGroup, setFilterGroup] = useState('all')
-  const [form, setForm] = useState<UserForm>(EMPTY_FORM)
-  const [editForm, setEditForm] = useState<UserForm>(EMPTY_FORM)
+  const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState<StatusFilter>('all')
+  // null: closed, 'new': creating, otherwise the user being edited.
+  const [dialog, setDialog] = useState<ShopUser | 'new' | null>(null)
 
-  const canCreate = String(user?.role) === 'admin' || Boolean(user?.permissions?.find((permission) => permission.module === 'users')?.actions.includes('create'))
-  const canEdit = String(user?.role) === 'admin' || Boolean(user?.permissions?.find((permission) => permission.module === 'users')?.actions.includes('edit'))
+  const canCreate = canAccess(user, 'users', 'create')
+  const canEdit = canAccess(user, 'users', 'edit')
+  const isOwner = isFullAccessRole(user?.role)
 
   const loadUsers = async () => {
     try {
@@ -80,452 +93,324 @@ export function ShopUsers({ theme, toggleTheme, setPage }: ThemePageProps & Pick
       setRoles(roleResponse.roles.filter((role) => role.active))
       setError('')
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'Could not load business users.')
+      setError(loadError instanceof Error ? loadError.message : 'Could not load staff.')
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
-    const loader = window.setTimeout(() => {
-      void loadUsers()
-    }, 0)
-    return () => window.clearTimeout(loader)
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- state is only set after the request resolves
+    void loadUsers()
   }, [])
 
-  const createUser = async (event: FormEvent) => {
-    event.preventDefault()
-    setSaving(true)
+  const toggleActive = async (target: ShopUser) => {
+    setUpdatingId(target.id)
     try {
-      await api.createShopUser(form)
-      setForm(EMPTY_FORM)
-      setIsFormOpen(false)
-      await loadUsers()
-    } catch (createError) {
-      setError(createError instanceof Error ? createError.message : 'Could not create the user account.')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const updateUser = async (userToUpdate: ShopUser, payload: Partial<UserForm> & { active?: boolean }) => {
-    setUpdatingId(userToUpdate.id)
-    try {
-      await api.updateShopUser(userToUpdate.id, payload)
+      await api.updateShopUser(target.id, { active: !target.active })
       await loadUsers()
     } catch (updateError) {
-      setError(updateError instanceof Error ? updateError.message : 'Could not update the user account.')
+      setError(updateError instanceof Error ? updateError.message : 'Could not update the account.')
     } finally {
       setUpdatingId('')
     }
   }
 
-  const openEditUser = (targetUser: ShopUser) => {
-    setEditForm({
-      username: targetUser.username,
-      email: targetUser.email,
-      password: '',
-      shopRole: targetUser.shopRole,
-      accountType: targetUser.accountType,
-      accessRoleCode: targetUser.accessRoleCode || (targetUser.accountType === 'admin' ? 'administrator' : 'cashier'),
-    })
-    setEditingUser(targetUser)
-  }
-
-  const saveEditUser = async (event: FormEvent) => {
-    event.preventDefault()
-    if (!editingUser) return
-    setSaving(true)
-    try {
-      await updateUser(editingUser, editForm)
-      setEditingUser(null)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const filtered = users.filter((u) => {
-    const matchSearch = !searchQ
-      || u.username.toLowerCase().includes(searchQ.toLowerCase())
-      || u.email.toLowerCase().includes(searchQ.toLowerCase())
-      || roleLabel(u.shopRole).toLowerCase().includes(searchQ.toLowerCase())
-    const matchGroup = filterGroup === 'all'
-      || roleGroupOf(u.shopRole)?.label === filterGroup
-      || (filterGroup === 'admin' && u.accountType === 'admin')
-    return matchSearch && matchGroup
+  const query = search.trim().toLowerCase()
+  const filtered = users.filter((row) => {
+    const matchesFilter = filter === 'all'
+      || (filter === 'inactive' ? !row.active : row.accountType === filter)
+    const matchesSearch = !query
+      || row.username.toLowerCase().includes(query)
+      || row.email.toLowerCase().includes(query)
+      || jobLabel(row.shopRole).toLowerCase().includes(query)
+    return matchesFilter && matchesSearch
   })
-
-  const activeCount = users.filter((u) => u.active).length
-  const adminCount = users.filter((u) => u.accountType === 'admin').length
-  const deptCounts = ROLE_GROUPS.map((g) => ({
-    ...g,
-    count: users.filter((u) => g.roles.some(([value]) => value === u.shopRole)).length,
-  }))
 
   return (
     <>
-      <Topbar title="User Management" placeholder="Search the active branch..." theme={theme} toggleTheme={toggleTheme} />
-      <div className="shop-users-page page-pad">
-        <header className="shop-users-heading">
-          <div>
-            <h1>👥 Users &amp; Team Management</h1>
-            <p>
-              {loading
-                ? 'Loading workers...'
-                : `${users.length} worker account${users.length !== 1 ? 's' : ''} · ${activeCount} active · ${adminCount} admin`}
-            </p>
+      <Topbar title="" placeholder="Search the active branch..." theme={theme} toggleTheme={toggleTheme} />
+      <div className="page-pad shop-users-page">
+        <div className="page-title-row">
+          <h1>Staff<span className="count-badge">{users.length}</span></h1>
+          <div className="toolbar">
+            <input type="search" placeholder="Search staff" value={search} onChange={(event) => setSearch(event.target.value)} />
+            <div className="segmented">
+              {FILTERS.map(([value, label]) => (
+                <button key={value} type="button" className={filter === value ? 'active' : ''} onClick={() => setFilter(value)}>{label}</button>
+              ))}
+            </div>
+            <button type="button" className="secondary-action" onClick={() => setPage('access-control')}>Roles</button>
+            {canCreate && <button type="button" className="primary-action" onClick={() => setDialog('new')}>+ Add staff</button>}
           </div>
-          <div className="shop-users-heading-actions">
-            <button type="button" className="secondary-action" onClick={() => setPage('access-control')}>
-              🛡️ Roles &amp; permissions
-            </button>
-            {canCreate && (
-              <button type="button" className="primary-action" onClick={() => setIsFormOpen(true)}>
-                + Add Worker
-              </button>
-            )}
-          </div>
-        </header>
-
-        {error && <div className="admin-error" role="alert">{error}</div>}
-
-        {/* Department stat filter pills */}
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '14px' }}>
-          <button
-            type="button"
-            onClick={() => setFilterGroup('all')}
-            style={{
-              padding: '6px 14px', borderRadius: '20px', fontSize: '12px', cursor: 'pointer', border: '1px solid',
-              background: filterGroup === 'all' ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.04)',
-              borderColor: filterGroup === 'all' ? 'rgba(99,102,241,0.5)' : 'var(--line, rgba(255,255,255,0.1))',
-              color: filterGroup === 'all' ? '#a5b4fc' : 'inherit',
-              fontWeight: filterGroup === 'all' ? 600 : 400,
-            }}
-          >
-            All ({users.length})
-          </button>
-          {deptCounts.map((d) => (
-            <button
-              key={d.label}
-              type="button"
-              onClick={() => setFilterGroup(d.label)}
-              style={{
-                padding: '6px 14px', borderRadius: '20px', fontSize: '12px', cursor: 'pointer', border: '1px solid',
-                background: filterGroup === d.label ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.04)',
-                borderColor: filterGroup === d.label ? 'rgba(99,102,241,0.5)' : 'var(--line, rgba(255,255,255,0.1))',
-                color: filterGroup === d.label ? '#a5b4fc' : 'inherit',
-                fontWeight: filterGroup === d.label ? 600 : 400,
-              }}
-            >
-              {d.icon} {d.label} ({d.count})
-            </button>
-          ))}
-          {adminCount > 0 && (
-            <button
-              type="button"
-              onClick={() => setFilterGroup('admin')}
-              style={{
-                padding: '6px 14px', borderRadius: '20px', fontSize: '12px', cursor: 'pointer', border: '1px solid',
-                background: filterGroup === 'admin' ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.04)',
-                borderColor: filterGroup === 'admin' ? 'rgba(245,158,11,0.5)' : 'var(--line, rgba(255,255,255,0.1))',
-                color: filterGroup === 'admin' ? '#fbbf24' : 'inherit',
-                fontWeight: filterGroup === 'admin' ? 600 : 400,
-              }}
-            >
-              👑 Admins ({adminCount})
-            </button>
-          )}
         </div>
 
-        {/* Search */}
-        <div style={{ marginBottom: '14px' }}>
-          <input
-            type="search"
-            placeholder="Search by name, email or role..."
-            value={searchQ}
-            onChange={(e) => setSearchQ(e.target.value)}
-            style={{
-              width: '100%', maxWidth: '360px', padding: '9px 13px', borderRadius: '8px',
-              border: '1px solid var(--line, rgba(255,255,255,0.1))',
-              background: 'rgba(255,255,255,0.04)', color: 'inherit', fontSize: '13px',
-            }}
-          />
-        </div>
+        {error && <div className="notice error" role="alert">{error}</div>}
 
-        <section className="admin-activity-section">
-          <div className="admin-activity-table-wrap">
-            <table className="admin-activity-table shop-users-table">
-              <thead>
-                <tr>
-                  <th>Worker</th>
-                  <th>Department</th>
-                  <th>Role</th>
-                  <th>Account</th>
-                  <th>Access Level</th>
-                  <th>Status</th>
-                  <th style={{ textAlign: 'right' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading && (
-                  <tr>
-                    <td className="admin-empty" colSpan={7}>Loading users...</td>
-                  </tr>
-                )}
-                {!loading && filtered.length === 0 && (
-                  <tr>
-                    <td colSpan={7} style={{ textAlign: 'center', padding: '36px' }}>
-                      <div style={{ fontSize: '36px', marginBottom: '8px' }}>👥</div>
-                      <div style={{ fontWeight: 600, fontSize: '15px', marginBottom: '4px' }}>
-                        {users.length === 0 ? 'No worker accounts yet' : 'No matching worker accounts found'}
+        <div className="table-frame">
+          <table className="shop-users-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Job</th>
+                <th>Access role</th>
+                <th>Page access</th>
+                <th>Status</th>
+                <th aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {loading && <tr><td colSpan={6} className="empty-state">Loading…</td></tr>}
+              {!loading && filtered.length === 0 && (
+                <tr><td colSpan={6} className="empty-state">{users.length ? 'No matches' : 'No staff yet'}</td></tr>
+              )}
+              {filtered.map((row) => {
+                const added = countPermissions(row.permissionGrants)
+                const removed = countPermissions(row.permissionRevokes)
+                const isSelf = row.id === user?.id
+                const editable = canEdit && (isOwner || row.accountType !== 'admin')
+                return (
+                  <tr key={row.id}>
+                    <td>
+                      <div className="staff-cell">
+                        <span className={`product-avatar ${row.accountType === 'admin' ? 'admin' : ''}`}>{row.username.slice(0, 1).toUpperCase()}</span>
+                        <div>
+                          <strong>{row.username}{isSelf && <small className="you-tag">you</small>}</strong>
+                          <small>{row.email}</small>
+                        </div>
                       </div>
-                      <div style={{ fontSize: '13px', color: 'var(--text-soft)' }}>
-                        {users.length === 0
-                          ? 'Create the first account for your team by clicking "+ Add Worker"'
-                          : 'Try adjusting your search or department filter'}
-                      </div>
-                      {users.length === 0 && canCreate && (
-                        <button
-                          type="button"
-                          className="primary-action"
-                          onClick={() => setIsFormOpen(true)}
-                          style={{ marginTop: '14px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-                        >
-                          + Add Worker
-                        </button>
+                    </td>
+                    <td>{jobLabel(row.shopRole)}</td>
+                    <td><span className="access-role-chip">{row.accountType === 'admin' ? 'Administrator' : roleName(roles, row.accessRoleCode)}</span></td>
+                    <td>
+                      {row.accountType === 'admin'
+                        ? <span className="access-tag full">Full</span>
+                        : added || removed
+                          ? <span className="access-tag custom">{added ? `+${added}` : ''}{added && removed ? ' ' : ''}{removed ? `−${removed}` : ''}</span>
+                          : <span className="access-tag">Role</span>}
+                    </td>
+                    <td><span className={`admin-status ${row.active ? 'positive' : 'neutral'}`}>{row.active ? 'Active' : 'Inactive'}</span></td>
+                    <td className="row-actions">
+                      {editable && (
+                        <>
+                          <button type="button" className="link-button" onClick={() => setDialog(row)}>Edit</button>
+                          {!isSelf && (
+                            <button type="button" className="link-button" disabled={updatingId === row.id} onClick={() => void toggleActive(row)}>
+                              {updatingId === row.id ? '…' : row.active ? 'Deactivate' : 'Activate'}
+                            </button>
+                          )}
+                        </>
                       )}
                     </td>
                   </tr>
-                )}
-                {filtered.map((targetUser) => {
-                  const group = roleGroupOf(targetUser.shopRole)
-                  return (
-                    <tr key={targetUser.id}>
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <div
-                            style={{
-                              width: '32px', height: '32px', borderRadius: '50%', flexShrink: 0,
-                              background: targetUser.accountType === 'admin' ? 'rgba(245,158,11,0.2)' : 'rgba(99,102,241,0.2)',
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              fontSize: '13px', fontWeight: 700,
-                              color: targetUser.accountType === 'admin' ? '#fbbf24' : '#a5b4fc',
-                            }}
-                          >
-                            {targetUser.username.slice(0, 1).toUpperCase()}
-                          </div>
-                          <div>
-                            <strong style={{ display: 'block', fontSize: '13px' }}>{targetUser.username}</strong>
-                            <small style={{ color: 'var(--text-soft)', fontSize: '11px' }}>{targetUser.email}</small>
-                          </div>
-                        </div>
-                      </td>
-                      <td>
-                        {group ? (
-                          <span style={{ fontSize: '12px' }}>{group.icon} {group.label}</span>
-                        ) : (
-                          <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>—</span>
-                        )}
-                      </td>
-                      <td style={{ fontSize: '13px' }}>{roleLabel(targetUser.shopRole)}</td>
-                      <td>
-                        {targetUser.accountType === 'admin' ? (
-                          <span className="admin-type-label">👑 Administrator</span>
-                        ) : (
-                          <span style={{ background: 'rgba(148,163,184,0.1)', color: 'var(--text-soft)', border: '1px solid var(--line)', borderRadius: '4px', padding: '2px 7px', fontSize: '11px' }}>
-                            Staff
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        <span className="access-role-chip">{roleName(roles, targetUser.accessRoleCode)}</span>
-                      </td>
-                      <td>
-                        <span className={`admin-status ${targetUser.active ? 'positive' : 'neutral'}`}>
-                          {targetUser.active ? 'Active' : 'Inactive'}
-                        </span>
-                      </td>
-                      <td style={{ textAlign: 'right' }}>
-                        {canEdit ? (
-                          <div className="shop-user-actions" style={{ justifyContent: 'flex-end' }}>
-                            <button type="button" className="admin-user-action" onClick={() => openEditUser(targetUser)}>
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              className="admin-user-action"
-                              disabled={updatingId === targetUser.id}
-                              onClick={() => void updateUser(targetUser, { active: !targetUser.active })}
-                            >
-                              {updatingId === targetUser.id ? 'Updating...' : targetUser.active ? 'Deactivate' : 'Activate'}
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="admin-protected">View only</span>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </section>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      {isFormOpen && (
+      {dialog && (
         <UserDialog
-          title="Add Worker"
-          note="Create a worker account and assign their department and role."
-          form={form}
+          key={dialog === 'new' ? 'new' : dialog.id}
+          target={dialog === 'new' ? null : dialog}
           roles={roles}
-          saving={saving}
-          submitLabel="Create Account"
-          onChange={setForm}
-          onClose={() => setIsFormOpen(false)}
-          onSubmit={createUser}
-        />
-      )}
-
-      {editingUser && (
-        <UserDialog
-          title={`Edit ${editingUser.username}`}
-          note="Update worker department, operational role or password."
-          form={editForm}
-          roles={roles}
-          saving={saving}
-          submitLabel="Save Changes"
-          onChange={setEditForm}
-          onClose={() => setEditingUser(null)}
-          onSubmit={saveEditUser}
+          modules={pageModules(processingEnabled)}
+          isOwner={isOwner}
+          isSelf={dialog !== 'new' && dialog.id === user?.id}
+          actorPermissions={user?.permissions || []}
+          onClose={() => setDialog(null)}
+          onSaved={async () => {
+            setDialog(null)
+            await loadUsers()
+          }}
         />
       )}
     </>
   )
 }
 
+function formForUser(target: ShopUser, roles: AccessRole[]): UserForm {
+  const accessRoleCode = target.accessRoleCode || (target.accountType === 'admin' ? 'administrator' : 'cashier')
+  const grants = target.permissionGrants ?? []
+  const revokes = target.permissionRevokes ?? []
+  const hasOverrides = grants.length > 0 || revokes.length > 0
+  return {
+    username: target.username,
+    email: target.email,
+    password: '',
+    shopRole: target.shopRole,
+    accountType: target.accountType,
+    accessRoleCode,
+    permissions: hasOverrides
+      ? applyOverrides(rolePermissions(roles, accessRoleCode), grants, revokes)
+      : null,
+  }
+}
+
 function UserDialog({
-  title,
-  note,
-  form,
+  target,
   roles,
-  saving,
-  submitLabel,
-  onChange,
+  modules,
+  isOwner,
+  isSelf,
+  actorPermissions,
   onClose,
-  onSubmit,
+  onSaved,
 }: {
-  title: string
-  note: string
-  form: UserForm
+  target: ShopUser | null
   roles: AccessRole[]
-  saving: boolean
-  submitLabel: string
-  onChange: (form: UserForm) => void
+  modules: string[]
+  isOwner: boolean
+  isSelf: boolean
+  actorPermissions: RolePermission[]
   onClose: () => void
-  onSubmit: (event: FormEvent) => void
+  onSaved: () => Promise<void>
 }) {
+  const [form, setForm] = useState<UserForm>(() => (target ? formForUser(target, roles) : EMPTY_FORM))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const isNew = !target
+  // Non-owners cannot change their own access; the server enforces this too.
+  const accessLocked = isSelf && !isOwner
+  const roleBase = rolePermissions(roles, form.accessRoleCode)
+  const effective = form.permissions ?? roleBase
+  const customized = form.permissions !== null
+  const assignableRoles = isOwner ? roles : roles.filter((role) => role.permissions.every(({ module, actions }) => actions.every((action) => hasPermission(actorPermissions, module, action))))
+
+  const canChange = (module: string, action: PermissionAction) =>
+    isOwner || hasPermission(effective, module, action) || hasPermission(actorPermissions, module, action)
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    setSaving(true)
+    setError('')
+    const { grants, revokes } = form.accountType === 'admin' || !form.permissions
+      ? { grants: [], revokes: [] }
+      : diffPermissions(roleBase, form.permissions)
+    const details = { username: form.username, email: form.email, password: form.password, shopRole: form.shopRole }
+    const access = {
+      accountType: form.accountType,
+      accessRoleCode: form.accountType === 'admin' ? 'administrator' : form.accessRoleCode,
+      permissionGrants: grants,
+      permissionRevokes: revokes,
+    }
+    try {
+      if (target) await api.updateShopUser(target.id, accessLocked ? details : { ...details, ...access })
+      else await api.createShopUser({ ...details, ...access })
+      await onSaved()
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Could not save the account.')
+      setSaving(false)
+    }
+  }
+
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="entry-modal admin-user-modal" role="dialog" aria-modal="true" aria-label={title}>
+      <section className="entry-modal admin-user-modal staff-dialog" role="dialog" aria-modal="true" aria-label={isNew ? 'Add staff' : `Edit ${target.username}`}>
         <header className="detail-head">
-          <div>
-            <h2>{title}</h2>
-            <p>{note}</p>
-          </div>
-          <button type="button" className="modal-close" onClick={onClose} disabled={saving} aria-label="Close">
-            x
-          </button>
+          <h2>{isNew ? 'Add staff' : target.username}</h2>
+          <button type="button" className="modal-close" onClick={onClose} disabled={saving} aria-label="Close">×</button>
         </header>
-        <form className="admin-user-form" onSubmit={onSubmit}>
+        <form className="admin-user-form" onSubmit={submit}>
           <label>
-            Worker Name
-            <input
-              required
-              value={form.username}
-              onChange={(event) => onChange({ ...form, username: event.target.value })}
-              placeholder="e.g. Jean Claude"
-            />
+            Name
+            <input required value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} />
           </label>
           <label>
-            Email Address
-            <input
-              required
-              type="email"
-              value={form.email}
-              onChange={(event) => onChange({ ...form, email: event.target.value })}
-              placeholder="worker@business.com"
-            />
+            Email
+            <input required type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} />
           </label>
           <label>
             Password
             <input
-              required={title.startsWith('Add')}
+              required={isNew}
               type="password"
               minLength={8}
-              placeholder={title.startsWith('Add') ? 'At least 8 characters' : 'Leave blank to keep current password'}
+              autoComplete="new-password"
+              placeholder={isNew ? 'Min. 8 characters' : 'Unchanged'}
               value={form.password}
-              onChange={(event) => onChange({ ...form, password: event.target.value })}
+              onChange={(event) => setForm({ ...form, password: event.target.value })}
             />
           </label>
           <label>
-            Account Type
-            <select
-              value={form.accountType}
-              onChange={(event) =>
-                onChange({
-                  ...form,
-                  accountType: event.target.value as UserForm['accountType'],
-                  accessRoleCode: event.target.value === 'admin' ? 'administrator' : form.accessRoleCode,
-                })
-              }
-            >
-              <option value="staff">Staff</option>
-              <option value="admin">Administrator</option>
-            </select>
-          </label>
-          <label>
-            Department &amp; Operational Role
-            <select
-              value={form.shopRole}
-              onChange={(event) => onChange({ ...form, shopRole: event.target.value as ShopRole })}
-            >
-              {ROLE_GROUPS.map((group) => (
-                <optgroup key={group.label} label={`${group.icon} ${group.label}`}>
-                  {group.roles.map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
+            Job
+            <select value={form.shopRole} onChange={(event) => setForm({ ...form, shopRole: event.target.value as ShopRole })}>
+              {JOB_GROUPS.map((group) => (
+                <optgroup key={group.label} label={group.label}>
+                  {group.roles.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </optgroup>
               ))}
             </select>
           </label>
           <label>
-            System Access Role
+            Account
             <select
-              value={form.accessRoleCode}
-              onChange={(event) => onChange({ ...form, accessRoleCode: event.target.value })}
+              value={form.accountType}
+              disabled={accessLocked || !isOwner}
+              onChange={(event) => {
+                const accountType = event.target.value as UserForm['accountType']
+                setForm({ ...form, accountType, accessRoleCode: accountType === 'admin' ? 'administrator' : 'cashier', permissions: null })
+              }}
             >
-              {roles.map((role) => (
-                <option key={role.code} value={role.code}>
-                  {role.name}
-                </option>
-              ))}
+              <option value="staff">Staff</option>
+              <option value="admin">Administrator</option>
             </select>
           </label>
+          {form.accountType === 'staff' && (
+            <label>
+              Access role
+              <select
+                value={form.accessRoleCode}
+                disabled={accessLocked}
+                onChange={(event) => setForm({ ...form, accessRoleCode: event.target.value, permissions: null })}
+              >
+                {!assignableRoles.some((role) => role.code === form.accessRoleCode) && (
+                  <option value={form.accessRoleCode}>{roleName(roles, form.accessRoleCode)}</option>
+                )}
+                {assignableRoles.map((role) => <option key={role.code} value={role.code}>{role.name}</option>)}
+              </select>
+            </label>
+          )}
+
+          <div className="admin-user-form-wide staff-access">
+            {form.accountType === 'admin' ? (
+              <p className="empty-state">Administrators can open every page.</p>
+            ) : (
+              <>
+                <div className="staff-access-head">
+                  <h3>Page access</h3>
+                  <span className="access-legend"><i className="granted" />Added <i className="revoked" />Removed</span>
+                  {customized && !accessLocked && (
+                    <button type="button" className="link-button" onClick={() => setForm({ ...form, permissions: null })}>Reset to role</button>
+                  )}
+                </div>
+                <PermissionMatrix
+                  modules={modules}
+                  value={effective}
+                  base={roleBase}
+                  canChange={canChange}
+                  disabled={accessLocked}
+                  onChange={(permissions) => setForm({ ...form, permissions })}
+                />
+              </>
+            )}
+          </div>
+
+          {error && <div className="notice error admin-user-form-wide" role="alert">{error}</div>}
           <footer>
-            <button type="button" onClick={onClose} disabled={saving}>
-              Cancel
-            </button>
-            <button type="submit" className="primary-action" disabled={saving}>
-              {saving ? 'Saving...' : submitLabel}
-            </button>
+            <button type="button" onClick={onClose} disabled={saving}>Cancel</button>
+            <button type="submit" className="primary-action" disabled={saving}>{saving ? 'Saving…' : isNew ? 'Create' : 'Save'}</button>
           </footer>
         </form>
       </section>
     </div>
   )
+}
+
+function rolePermissions(roles: AccessRole[], code: string) {
+  return roles.find((role) => role.code === code)?.permissions || []
 }
 
 function roleName(roles: AccessRole[], code: string) {

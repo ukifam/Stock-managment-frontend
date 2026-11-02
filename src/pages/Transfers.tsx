@@ -1,14 +1,34 @@
-import { useEffect, useMemo, useState } from 'react'
-import { api, type PartnerTransfer } from '../api'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { api, type InventoryRow, type PartnerTransfer } from '../api'
 import { Topbar } from '../components/Topbar'
 import { formatMoney } from '../utils/money'
 import type { PageRenderProps } from '../types'
+import { ShopTransfers } from './ShopTransfers'
 
-export const page = { id: 'transfers' as const, label: 'Transfers', icon: 'transfer' }
+type TransferTab = 'shops' | 'consignment'
+
+export function Transfers({ theme, toggleTheme, currency = 'RWF', setPage }: Partial<PageRenderProps>) {
+  const [tab, setTab] = useState<TransferTab>('shops')
+  return (
+    <>
+      <Topbar title="" placeholder="Search the active branch..." theme={theme ?? 'dark'} toggleTheme={toggleTheme ?? (() => undefined)} />
+      <div className="page-pad transfers-shell">
+        <div className="page-title-row">
+          <h1>Transfers</h1>
+          <div className="segmented" role="tablist" aria-label="Transfer type">
+            <button type="button" role="tab" aria-selected={tab === 'shops'} className={tab === 'shops' ? 'active' : ''} onClick={() => setTab('shops')}>Between shops</button>
+            <button type="button" role="tab" aria-selected={tab === 'consignment'} className={tab === 'consignment' ? 'active' : ''} onClick={() => setTab('consignment')}>Consignment</button>
+          </div>
+        </div>
+        {tab === 'shops' ? <ShopTransfers currency={currency} setPage={setPage} /> : <ConsignmentPanel currency={currency} />}
+      </div>
+    </>
+  )
+}
 
 type TransferAction = 'sell' | 'return'
 
-export function Transfers({ theme, toggleTheme, currency = 'RWF' }: Partial<PageRenderProps>) {
+function ConsignmentPanel({ currency }: { currency: string }) {
   const [transfers, setTransfers] = useState<PartnerTransfer[]>([])
   const [statusFilter, setStatusFilter] = useState('OPEN')
   const [search, setSearch] = useState('')
@@ -19,6 +39,10 @@ export function Transfers({ theme, toggleTheme, currency = 'RWF' }: Partial<Page
   const [selected, setSelected] = useState<PartnerTransfer | null>(null)
   const [action, setAction] = useState<TransferAction>('sell')
   const [receiveModalOpen, setReceiveModalOpen] = useState(false)
+  const [direction, setDirection] = useState<'IN' | 'OUT'>('IN')
+  const [accountingMode, setAccountingMode] = useState<'NONE' | 'PURCHASE' | 'SALE' | 'DISPOSAL'>('NONE')
+  const [inventoryItems, setInventoryItems] = useState<InventoryRow[]>([])
+  const [outSku, setOutSku] = useState('')
 
   const [partner, setPartner] = useState('')
   const [partnerPhone, setPartnerPhone] = useState('')
@@ -37,7 +61,7 @@ export function Transfers({ theme, toggleTheme, currency = 'RWF' }: Partial<Page
   const [payment, setPayment] = useState('Cash')
   const [returnNotes, setReturnNotes] = useState('')
 
-  const reload = async () => {
+  const reload = useCallback(async () => {
     setLoading(true)
     try {
       const response = await api.partnerTransfers(statusFilter, search)
@@ -45,17 +69,24 @@ export function Transfers({ theme, toggleTheme, currency = 'RWF' }: Partial<Page
       setSelected((current) => response.rows.find((row) => row._id === current?._id) ?? null)
       setError('')
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'Could not load partner transfers.')
+      setError(loadError instanceof Error ? loadError.message : 'Could not load consignment stock.')
       setTransfers([])
     } finally {
       setLoading(false)
     }
-  }
+  }, [statusFilter, search])
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void reload() }, 180)
     return () => window.clearTimeout(timer)
-  }, [statusFilter, search])
+  }, [reload])
+
+  useEffect(() => {
+    void api.inventory(2000).then((response) => {
+      setInventoryItems(response.rows)
+      setOutSku(response.rows[0]?.sku || '')
+    }).catch(() => setInventoryItems([]))
+  }, [])
 
   const openTransfers = useMemo(() => transfers.filter((transfer) => transfer.status === 'OPEN'), [transfers])
 
@@ -65,18 +96,23 @@ export function Transfers({ theme, toggleTheme, currency = 'RWF' }: Partial<Page
     setError('')
     setNotice('')
     try {
-      const created = await api.receivePartnerTransfer({
+      const result = await api.processTransfer({
+        direction,
+        accountingMode,
         partner: partner.trim(),
         partnerPhone: partnerPhone.trim() || undefined,
         item: item.trim(),
         sku: sku.trim() || undefined,
         category: category.trim() || 'General',
-        quantityReceived: Number(quantityReceived),
-        partnerUnitCost: Number(partnerUnitCost),
+        quantity: Number(quantityReceived),
+        unitCost: Number(partnerUnitCost),
+        unitPrice: Number(partnerUnitCost),
         customerUnitPrice: Number(customerUnitPrice),
-        receivedDate,
+        inventoryPrice: Number(partnerUnitCost),
+        date: receivedDate,
         notes: notes.trim() || undefined,
       })
+      const created = result.transfer
       setPartner('')
       setPartnerPhone('')
       setItem('')
@@ -89,7 +125,9 @@ export function Transfers({ theme, toggleTheme, currency = 'RWF' }: Partial<Page
       setStatusFilter('OPEN')
       setSelected(created)
       setReceiveModalOpen(false)
-      setNotice(`Received ${created.quantityReceived} ${created.item} from ${created.partner}. Your inventory was not changed.`)
+      setNotice(accountingMode === 'PURCHASE'
+        ? `Received ${created.quantityReceived} ${created.item} and recorded the owned purchase.`
+        : `Received ${created.quantityReceived} ${created.item} as partner-owned stock. Inventory was not changed.`)
       await reload()
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Could not record partner stock.')
@@ -142,19 +180,14 @@ export function Transfers({ theme, toggleTheme, currency = 'RWF' }: Partial<Page
 
   return (
     <>
-      <Topbar title="Transfers" placeholder="Search partner, item, SKU, or transfer..." theme={theme ?? 'dark'} toggleTheme={toggleTheme ?? (() => undefined)} />
-      <div className="transfers-page page-pad">
+      <div className="transfers-page">
         <header className="transfers-heading">
-          <div>
-            <h1>Partner Stock Transfers</h1>
-            <p>Track partner-owned stock separately. Receiving and returning it never changes your inventory.</p>
-          </div>
           <div className="transfers-heading-actions">
-            <div className="transfer-balance" aria-label="Open transfer count">
-              <span>Open transfers</span><strong>{openTransfers.length}</strong>
+            <div className="transfer-balance" aria-label="Open consignment count">
+              <span>Open</span><strong>{openTransfers.length}</strong>
             </div>
-            <button className="primary-action" type="button" onClick={() => { setReceiveModalOpen(true); setError('') }}>
-              Receive partner items
+            <button className="primary-action" type="button" onClick={() => { setDirection('IN'); setAccountingMode('NONE'); setReceiveModalOpen(true); setError('') }}>
+              Receive stock
             </button>
           </div>
         </header>
@@ -167,14 +200,14 @@ export function Transfers({ theme, toggleTheme, currency = 'RWF' }: Partial<Page
             <section className="entry-modal transfer-receive-modal" role="dialog" aria-modal="true" aria-labelledby="receive-transfer-title">
               <div className="detail-head">
                 <div>
-                  <h2 id="receive-transfer-title">Receive partner items</h2>
-                  <p>Record partner stock separately from your own inventory.</p>
+                  <h2 id="receive-transfer-title">{accountingMode === 'PURCHASE' ? 'Transfer in as purchase' : 'Transfer in without purchase'}</h2>
+                  <p>{accountingMode === 'PURCHASE' ? 'Add owned stock and create purchase accounting.' : 'Keep partner-owned stock outside your inventory.'}</p>
                 </div>
                 <button type="button" aria-label="Close receive partner items modal" onClick={() => setReceiveModalOpen(false)} disabled={saving}>Close</button>
               </div>
               {error && <div className="transfer-feedback error" role="alert">{error}</div>}
               <form className="transfer-receive-form" onSubmit={receiveStock}>
-                <label>Partner shop<input required value={partner} onChange={(event) => setPartner(event.target.value)} placeholder="Partner or shop name" /></label>
+                <label>{accountingMode === 'PURCHASE' ? 'Supplier' : 'Partner shop'}<input required value={partner} onChange={(event) => setPartner(event.target.value)} placeholder={accountingMode === 'PURCHASE' ? 'Supplier name' : 'Partner or shop name'} /></label>
                 <label>Partner phone<input value={partnerPhone} onChange={(event) => setPartnerPhone(event.target.value)} placeholder="Optional contact" /></label>
                 <label>Item name<input required value={item} onChange={(event) => setItem(event.target.value)} placeholder="Product name" /></label>
                 <label>SKU / partner reference<input value={sku} onChange={(event) => setSku(event.target.value)} placeholder="Optional SKU" /></label>
@@ -186,16 +219,46 @@ export function Transfers({ theme, toggleTheme, currency = 'RWF' }: Partial<Page
                 <label className="transfer-notes-field">Notes<input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Optional agreement or condition notes" /></label>
                 <div className="transfer-modal-actions">
                   <button type="button" onClick={() => setReceiveModalOpen(false)} disabled={saving}>Cancel</button>
-                  <button className="primary-action" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Record partner stock'}</button>
+                  <button className="primary-action" type="submit" disabled={saving}>{saving ? 'Saving…' : accountingMode === 'PURCHASE' ? 'Record transfer and purchase' : 'Record transfer in'}</button>
                 </div>
               </form>
             </section>
           </div>
         )}
 
+        <section className="transfer-in-out-section">
+          <div className="transfer-direction-tabs" role="tablist" aria-label="Transfer direction">
+            <button type="button" role="tab" aria-selected={direction === 'IN'} className={direction === 'IN' ? 'active' : ''} onClick={() => { setDirection('IN'); setAccountingMode('NONE'); setError('') }}>Transfer in</button>
+            <button type="button" role="tab" aria-selected={direction === 'OUT'} className={direction === 'OUT' ? 'active' : ''} onClick={() => { setDirection('OUT'); setAccountingMode('NONE'); setError('') }}>Transfer out</button>
+          </div>
+          {direction === 'OUT' ? (
+            <OutTransferForm
+              inventoryItems={inventoryItems}
+              outSku={outSku}
+              setOutSku={setOutSku}
+              accountingMode={accountingMode === 'SALE' || accountingMode === 'DISPOSAL' ? accountingMode : 'NONE'}
+              setAccountingMode={(mode) => setAccountingMode(mode)}
+              saving={saving}
+              setSaving={setSaving}
+              currency={currency}
+              onSaved={async (notice) => { setNotice(notice); await reload() }}
+              onError={setError}
+            />
+          ) : (
+            <div className="transfer-in-choice">
+              <button type="button" className={accountingMode === 'NONE' ? 'active' : ''} onClick={() => { setAccountingMode('NONE'); setReceiveModalOpen(true) }}>
+                <strong>Transfer in only</strong><span>Partner-owned stock; inventory stays unchanged</span>
+              </button>
+              <button type="button" className={accountingMode === 'PURCHASE' ? 'active' : ''} onClick={() => { setAccountingMode('PURCHASE'); setReceiveModalOpen(true) }}>
+                <strong>Transfer in as purchase</strong><span>Receives owned inventory and records a purchase</span>
+              </button>
+            </div>
+          )}
+        </section>
+
         <section className="transfer-register-section">
           <div className="transfer-section-heading transfer-register-heading">
-            <div><h2>Transfer register</h2><p>Partner quantities remain outside your owned inventory.</p></div>
+            <div><h2>Transfer register</h2></div>
             <div className="transfer-register-filters">
               <label>Show<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="OPEN">Open</option><option value="CLOSED">Closed</option><option value="ALL">All transfers</option></select></label>
               <label>Search<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Partner, item, SKU, reference" /></label>
@@ -249,6 +312,90 @@ export function Transfers({ theme, toggleTheme, currency = 'RWF' }: Partial<Page
         )}
       </div>
     </>
+  )
+}
+
+type OutTransferProps = {
+  inventoryItems: InventoryRow[]
+  outSku: string
+  setOutSku: (sku: string) => void
+  accountingMode: 'NONE' | 'SALE' | 'DISPOSAL'
+  setAccountingMode: (mode: 'NONE' | 'SALE' | 'DISPOSAL') => void
+  saving: boolean
+  setSaving: (saving: boolean) => void
+  currency: string
+  onSaved: (notice: string) => Promise<void>
+  onError: (message: string) => void
+}
+
+function OutTransferForm({ inventoryItems, outSku, setOutSku, accountingMode, setAccountingMode, saving, setSaving, currency, onSaved, onError }: OutTransferProps) {
+  const [quantity, setQuantity] = useState('1')
+  const [partner, setPartner] = useState('')
+  const [unitPrice, setUnitPrice] = useState('')
+  const [payment, setPayment] = useState('Cash')
+  const [notes, setNotes] = useState('')
+  const selected = inventoryItems.find((row) => row.sku === outSku)
+  const available = Number(selected?.rawStock ?? selected?.stock ?? 0)
+
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!selected) return onError('Select an inventory item.')
+    if (!Number.isInteger(Number(quantity)) || Number(quantity) <= 0) return onError('Quantity must be a positive whole number.')
+    if (Number(quantity) > available) return onError(`Only ${available} units are available.`)
+    if (accountingMode === 'SALE' && (!partner.trim() || Number(unitPrice) <= 0)) return onError('Enter a customer and sale price.')
+    onError('')
+    setSaving(true)
+    try {
+      const result = await api.processTransfer({
+        direction: 'OUT',
+        accountingMode,
+        partner: accountingMode === 'SALE' ? partner.trim() : partner.trim() || 'Stock transfer',
+        item: selected.item,
+        sku: selected.sku,
+        category: selected.category,
+        quantity: Number(quantity),
+        unitCost: selected.purchasePrice,
+        unitPrice: accountingMode === 'SALE' ? Number(unitPrice) : undefined,
+        customerUnitPrice: accountingMode === 'SALE' ? Number(unitPrice) : undefined,
+        payment,
+        date: today(),
+        notes: notes.trim() || undefined,
+      })
+      const action = accountingMode === 'NONE' ? 'Transfer out recorded' : accountingMode === 'SALE' ? 'Sale and transfer out recorded' : 'Disposal and transfer out recorded'
+      await onSaved(`${action}: ${quantity} ${result.transfer.item}.`)
+      setQuantity('1')
+      setPartner('')
+      setUnitPrice('')
+      setNotes('')
+    } catch (error) {
+      onError(error instanceof Error ? error.message : 'Could not record transfer out.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <form className="transfer-out-form" onSubmit={submit}>
+      <div className="transfer-out-modes" role="radiogroup" aria-label="Transfer out accounting">
+        <button type="button" role="radio" aria-checked={accountingMode === 'NONE'} className={accountingMode === 'NONE' ? 'active' : ''} onClick={() => setAccountingMode('NONE')}><strong>Transfer out only</strong><span>No sale or disposal accounting</span></button>
+        <button type="button" role="radio" aria-checked={accountingMode === 'SALE'} className={accountingMode === 'SALE' ? 'active' : ''} onClick={() => setAccountingMode('SALE')}><strong>Transfer out + sale</strong><span>Create a sale and stock movement</span></button>
+        <button type="button" role="radio" aria-checked={accountingMode === 'DISPOSAL'} className={accountingMode === 'DISPOSAL' ? 'active' : ''} onClick={() => setAccountingMode('DISPOSAL')}><strong>Transfer out + disposal</strong><span>Record damage / disposal</span></button>
+      </div>
+      <label>Inventory item
+        <select value={outSku} onChange={(event) => setOutSku(event.target.value)}>
+          <option value="">Select item</option>
+          {inventoryItems.map((row) => <option key={row.sku} value={row.sku}>{row.item} — {row.sku} ({row.rawStock ?? row.stock})</option>)}
+        </select>
+      </label>
+      <label>Quantity<input required type="number" min="1" step="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} /></label>
+      {accountingMode === 'SALE' ? <>
+        <label>Customer<input required value={partner} onChange={(event) => setPartner(event.target.value)} /></label>
+        <label>Sale price / unit<input required type="number" min="0.01" step="0.01" value={unitPrice} onChange={(event) => setUnitPrice(event.target.value)} /></label>
+        <label>Payment<select value={payment} onChange={(event) => setPayment(event.target.value)}><option value="Cash">Cash paid</option><option value="Credit">Credit / due</option></select></label>
+      </> : <label>{accountingMode === 'DISPOSAL' ? 'Disposal destination' : 'Destination / partner'}<input value={partner} onChange={(event) => setPartner(event.target.value)} placeholder="Optional" /></label>}
+      <label className="transfer-out-notes">Notes<input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Reason or handoff note" /></label>
+      <div className="transfer-modal-actions"><strong>Available: {available} units · {currency}</strong><button className="primary-action" type="submit" disabled={saving || inventoryItems.length === 0}>{saving ? 'Saving…' : 'Record transfer out'}</button></div>
+    </form>
   )
 }
 

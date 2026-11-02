@@ -2,7 +2,7 @@ import type { FilterPeriod, Page } from './types'
 
 export type CreditFilter = 'all' | 'salesCredit' | 'purchasesCredit'
 
-const DEFAULT_API_URL = 'http://localhost:5000/api'
+const DEFAULT_API_URL = 'https://stock-managment-backend-zfuv.onrender.com'
 const TOKEN_STORAGE_KEY = 'tri_ltd_auth_token'
 export const ACTIVE_BRANCH_STORAGE_KEY = 'tri_active_branch_code'
 const API_URL = (() => {
@@ -65,6 +65,7 @@ export type InventoryRow = {
   maximumStock?: number
   reorderLevel?: number
   purchasePrice?: number
+  sellingPrice?: number
   meta: string
   sku: string
   category: string
@@ -356,10 +357,16 @@ export type ReportsResponse = {
 
 export type SettingsResponse = {
   profile: { displayName: string; email: string }
-  system: { darkMode: boolean; biometricLogin: boolean; telemetryReports: boolean; quantumSync: boolean }
-  inventory: { lowStockThreshold: number; autoBackupFrequency: string; externalDatabase: string }
+  system: { darkMode: boolean }
+  inventory: { lowStockThreshold: number }
   financial: { currency: string }
-  hardware: { name: string; status: string }[]
+}
+
+export type SettingsPatch = {
+  profile?: { displayName?: string }
+  system?: { darkMode?: boolean }
+  inventory?: { lowStockThreshold?: number }
+  financial?: { currency?: string }
 }
 
 export type ManualEntryPayload = {
@@ -608,7 +615,7 @@ export type VenueRow = {
   notes: string
 }
 
-export type EntryStatus = 'Received' | 'Returned' | 'Given'
+export type EntryStatus = 'Pending' | 'Received' | 'Returned' | 'Given'
 
 export type ExpenseRow = {
   _id?: string
@@ -690,9 +697,54 @@ export type LoanMetrics = {
   totalLoans: number
 }
 
+export type ShopTransferItem = {
+  sku: string
+  item: string
+  category: string
+  unit: string
+  quantity: number
+  receivedQuantity: number
+  unitCost: number
+  sellingPrice: number
+}
+
+export type ShopTransfer = {
+  id: string
+  reference: string
+  direction: 'IN' | 'OUT'
+  fromBranch: string
+  fromName: string
+  toBranch: string
+  toName: string
+  status: 'IN_TRANSIT' | 'RECEIVED' | 'CANCELLED'
+  items: ShopTransferItem[]
+  totalUnits: number
+  receivedUnits: number
+  shortage: number
+  value: number
+  transporter: string
+  notes: string
+  receiveNotes: string
+  sentDate: string
+  expectedDate: string
+  receivedDate: string
+  sentBy: string
+  receivedBy: string
+}
+
+export type ShopTransferListResponse = {
+  rows: ShopTransfer[]
+  currentBranch: { code: string; name: string }
+  branches: Array<{ code: string; name: string }>
+  incomingCount: number
+}
+
 export type PartnerTransfer = {
   _id: string
   reference: string
+  direction?: 'IN' | 'OUT'
+  accountingMode?: 'NONE' | 'PURCHASE' | 'SALE' | 'DISPOSAL'
+  accountingReference?: string
   partner: string
   partnerPhone?: string
   sku?: string
@@ -709,6 +761,25 @@ export type PartnerTransfer = {
   realizedRevenue: number
   receivedDate: string
   status: 'OPEN' | 'CLOSED'
+  notes?: string
+}
+
+export type TransferProcessPayload = {
+  direction: 'IN' | 'OUT'
+  accountingMode: 'NONE' | 'PURCHASE' | 'SALE' | 'DISPOSAL'
+  partner: string
+  partnerPhone?: string
+  item: string
+  sku?: string
+  category?: string
+  quantity: number
+  unitCost?: number
+  unitPrice?: number
+  customerUnitPrice?: number
+  inventoryPrice?: number
+  payment?: string
+  paidAmount?: number
+  date?: string
   notes?: string
 }
 
@@ -857,8 +928,30 @@ export type ShopUser = {
   shopRole: ShopRole
   accountType: 'admin' | 'staff'
   accessRoleCode: string
+  permissionGrants: RolePermission[]
+  permissionRevokes: RolePermission[]
   active: boolean
   createdAt?: string
+}
+
+export type WeeklyEmailStatus = {
+  emailConfigured: boolean
+  schedule: string
+  nextRun: string
+  lastSentFor: string
+  lastSentAt: string | null
+  recipients: string[]
+}
+
+export type ShopUserPayload = {
+  username: string
+  email: string
+  password: string
+  shopRole: ShopRole
+  accountType: 'admin' | 'staff'
+  accessRoleCode: string
+  permissionGrants: RolePermission[]
+  permissionRevokes: RolePermission[]
 }
 
 export type BackendNotification = {
@@ -874,7 +967,7 @@ export type BackendNotification = {
   severity: 'critical' | 'warning' | 'info' | 'success'
   targetPage?: Page
   actionLabel?: string
-  metadata?: Record<string, any>
+  metadata?: Record<string, unknown>
   read: boolean
   createdAt: string
 }
@@ -1513,8 +1606,10 @@ export const api = {
   sales: (period?: FilterPeriod, from?: string, to?: string, page = 1, limit = 50) => request<ListResponse<SaleRow>>(`/sales${periodQuery(period, from, to, page, limit)}`),
   expenses: (page = 1, limit = 50, search = '', category = '') => request<ListResponse<ExpenseRow>>(`/expenses?page=${encodeURIComponent(String(page))}&limit=${encodeURIComponent(String(limit))}&search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}`),
   reports: (from?: string, to?: string, credit: CreditFilter = 'all') => request<ReportsResponse>(`/reports${reportQuery(from, to, credit)}`),
+  weeklyEmailStatus: () => request<WeeklyEmailStatus>('/reports/weekly-email'),
+  sendWeeklyEmail: () => request<{ recipients: string[]; period: { from: string; to: string } }>('/reports/weekly-email', { method: 'POST' }),
   settings: () => request<SettingsResponse>('/settings'),
-  updateSettings: (payload: Partial<SettingsResponse>) => request<SettingsResponse>('/settings', {
+  updateSettings: (payload: SettingsPatch) => request<SettingsResponse>('/settings', {
     method: 'PATCH',
     body: JSON.stringify(payload),
   }),
@@ -1665,6 +1760,12 @@ export const api = {
     if (search) params.set('search', search)
     return request<ListResponse<LoanRow>>(`/loans?${params.toString()}`)
   },
+  shopTransfers: (status = 'ALL', search = '') => request<ShopTransferListResponse>(`/transfers/shops?status=${encodeURIComponent(status)}&search=${encodeURIComponent(search)}`),
+  sendShopTransfer: (payload: { toBranch: string; items: Array<{ sku: string; quantity: number }>; transporter?: string; expectedDate?: string; notes?: string }) =>
+    request<ShopTransfer>('/transfers/shops', { method: 'POST', body: JSON.stringify(payload) }),
+  receiveShopTransfer: (id: string, payload: { items: Array<{ sku: string; receivedQuantity: number }>; notes?: string }) =>
+    request<ShopTransfer>(`/transfers/shops/${encodeURIComponent(id)}/receive`, { method: 'POST', body: JSON.stringify(payload) }),
+  cancelShopTransfer: (id: string) => request<ShopTransfer>(`/transfers/shops/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
   partnerTransfers: (status = 'ALL', search = '') => request<PartnerTransferListResponse>(`/transfers?status=${encodeURIComponent(status)}&search=${encodeURIComponent(search)}`),
   adminOverview: () => request<AdminOverview>('/admin/overview'),
   adminUsers: () => request<AdminUser[]>('/admin/users'),
@@ -1672,9 +1773,13 @@ export const api = {
   createAdminUser: (payload: CreateAdminUserPayload) => request<AdminUser>('/admin/users', { method: 'POST', body: JSON.stringify(payload) }),
   updateAdminUser: (id: string, payload: { username?: string; email?: string; password?: string; role?: 'admin' | 'staff'; ownerKey?: string; active?: boolean }) => request<AdminUser>(`/admin/users/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   shopUsers: () => request<ShopUser[]>('/shop/users'),
-  createShopUser: (payload: { username: string; email: string; password: string; shopRole: ShopRole; accountType: 'admin' | 'staff'; accessRoleCode: string }) => request<ShopUser>('/shop/users', { method: 'POST', body: JSON.stringify(payload) }),
-  updateShopUser: (id: string, payload: { username?: string; email?: string; password?: string; active?: boolean; shopRole?: ShopRole; accountType?: 'admin' | 'staff'; accessRoleCode?: string }) => request<ShopUser>(`/shop/users/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  createShopUser: (payload: ShopUserPayload) => request<ShopUser>('/shop/users', { method: 'POST', body: JSON.stringify(payload) }),
+  updateShopUser: (id: string, payload: Partial<ShopUserPayload> & { active?: boolean }) => request<ShopUser>(`/shop/users/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   receivePartnerTransfer: (payload: PartnerTransferPayload) => request<PartnerTransfer>('/transfers', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  processTransfer: (payload: TransferProcessPayload) => request<{ transfer: PartnerTransfer; accounting?: unknown }>('/transfers/process', {
     method: 'POST',
     body: JSON.stringify(payload),
   }),
@@ -1745,18 +1850,18 @@ export const api = {
     productName: string
     summary?: string
     details?: string
-    metrics?: Record<string, any>
+    metrics?: Record<string, unknown>
     severity?: 'critical' | 'warning' | 'info' | 'success'
   }) => request<{ success: boolean; notification: BackendNotification }>('/notifications/pipeline-activity', {
     method: 'POST',
     body: JSON.stringify(payload),
   }),
-  listPipelines: () => request<{ pipelines: any[] }>('/pipelines'),
-  savePipelineToServer: (pipeline: any) => request<{ pipeline: any }>('/pipelines', {
+  listPipelines: <T = unknown>() => request<{ pipelines: T[] }>('/pipelines'),
+  savePipelineToServer: <T extends object>(pipeline: T) => request<{ pipeline: T }>('/pipelines', {
     method: 'POST',
     body: JSON.stringify(pipeline),
   }),
-  bulkSavePipelines: (pipelines: any[]) => request<{ pipelines: any[] }>('/pipelines/bulk', {
+  bulkSavePipelines: <T extends object>(pipelines: T[]) => request<{ pipelines: T[] }>('/pipelines/bulk', {
     method: 'POST',
     body: JSON.stringify({ pipelines }),
   }),

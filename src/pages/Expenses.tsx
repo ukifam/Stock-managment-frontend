@@ -8,7 +8,6 @@ import { exportRows } from '../utils/export'
 import { formatMoney } from '../utils/money'
 import type { Page, ThemePageProps } from '../types'
 
-export const page = { id: 'expenses' as const, label: 'Expenses', icon: 'receipt' }
 
 type ExpensesProps = ThemePageProps & {
   page?: Page
@@ -331,7 +330,6 @@ export function Expenses({
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '12px' }}>
             <div>
               <h1>Expenses Ledger</h1>
-              <p>Record, manage, and review shop expenditures.</p>
             </div>
             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
               {onOpenReport && (
@@ -477,7 +475,6 @@ function ExpenseItemsView({
       <div className="inventory-title">
         <div>
           <h1>Expense Items Breakdown</h1>
-          <p>Itemized record of all individual shop expenses and operational expenditures.</p>
         </div>
         <div className="toolbar">
           <button type="button" onClick={handleExportItems}>

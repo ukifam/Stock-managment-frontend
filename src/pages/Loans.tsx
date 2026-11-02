@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type React from 'react'
 import { Topbar } from '../components/Topbar'
 import {
@@ -14,7 +14,6 @@ import { exportRows } from '../utils/export'
 import { formatMoney } from '../utils/money'
 import type { Page, ThemePageProps } from '../types'
 
-export const page = { id: 'loans' as const, label: 'Loans & Debt', icon: 'credit-card' }
 
 type LoansProps = ThemePageProps & {
   page?: Page
@@ -33,7 +32,7 @@ export function Loans({
 }: LoansProps) {
   const [loans, setLoans] = useState<LoanRow[]>([])
   const [metrics, setMetrics] = useState<LoanMetrics | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('ALL')
@@ -59,8 +58,7 @@ export function Loans({
     else if (tab === 'repayments') setPage?.('loans-repayments')
   }
 
-  const loadData = async () => {
-    setLoading(true)
+  const loadData = useCallback(async () => {
     try {
       const [loansRes, metricsRes] = await Promise.all([
         api.loans(),
@@ -68,19 +66,18 @@ export function Loans({
       ])
       setLoans(loansRes.rows)
       setMetrics(metricsRes)
-      if (loansRes.rows.length > 0 && !selectedId) {
-        setSelectedId(loansRes.rows[0].id)
-      }
+      setSelectedId((current) => current || loansRes.rows[0]?.id || '')
     } catch {
       setLoans([])
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   useEffect(() => {
-    loadData()
-  }, [])
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- state is only set after the request resolves
+    void loadData()
+  }, [loadData])
 
   const selectedLoan = loans.find((l) => l.id === selectedId) ?? loans[0]
 
@@ -717,7 +714,6 @@ function RepaymentsLedgerView({
       <div className="inventory-title">
         <div>
           <h1>Repayments Ledger</h1>
-          <p>Chronological audit log of all installments repaid on loans given and taken.</p>
         </div>
         <div className="toolbar">
           <button type="button" onClick={onExport}>
@@ -817,9 +813,7 @@ function CreateLoanModal({
   const [principal, setPrincipal] = useState('')
   const [interestRate, setInterestRate] = useState('0')
   const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10))
-  const [dueDate, setDueDate] = useState(
-    new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-  )
+  const [dueDate, setDueDate] = useState(() => new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10))
   const [installmentType, setInstallmentType] = useState('MONTHLY')
   const [purpose, setPurpose] = useState('')
   const [collateral, setCollateral] = useState('')

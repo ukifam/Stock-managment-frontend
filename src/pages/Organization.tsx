@@ -150,7 +150,6 @@ export function Organization({ theme, toggleTheme }: ThemePageProps) {
       <header className="organization-heading">
         <div>
           <h1>Business & organization</h1>
-          <p>Keep the business profile, branch operations, warehouses, and employee access in one place.</p>
         </div>
         {organization && <span className={`organization-status ${organization.business.active ? 'active' : 'inactive'}`}>{organization.business.active ? 'Business active' : 'Business inactive'}</span>}
       </header>
@@ -158,7 +157,7 @@ export function Organization({ theme, toggleTheme }: ThemePageProps) {
       {notice && <div className={`organization-notice ${notice.includes('Could not') || notice.includes('needs') ? 'error' : ''}`} role="status">{notice}</div>}
 
       <section className="organization-section">
-        <div className="organization-section-heading"><div><h2>Business profile</h2><p>Identity, tax treatment, currency, operating template, and whether this business runs processing work.</p></div><button type="button" className="secondary-action" onClick={() => { setBusinessDraft(organization?.business || EMPTY_BUSINESS); setIsBusinessModalOpen(true) }}>Edit business profile</button></div>
+        <div className="organization-section-heading"><div><h2>Business profile</h2></div><button type="button" className="secondary-action" onClick={() => { setBusinessDraft(organization?.business || EMPTY_BUSINESS); setIsBusinessModalOpen(true) }}>Edit business profile</button></div>
         {organization && <div className="organization-profile-summary">
           <div><span>Business</span><strong>{organization.business.name}</strong></div>
           <div><span>Industry</span><strong>{templateLabel(organization.business.template)}</strong></div>
@@ -168,7 +167,7 @@ export function Organization({ theme, toggleTheme }: ThemePageProps) {
       </section>
 
       <section className="organization-section organization-branches-section">
-        <div className="organization-section-heading"><div><h2>Branches & warehouses</h2><p>Each branch keeps its own stock, transactions, teams, and warehouse locations.</p></div><button type="button" className="secondary-action" onClick={() => beginBranch()}>Add branch</button></div>
+        <div className="organization-section-heading"><div><h2>Branches & warehouses</h2></div><button type="button" className="secondary-action" onClick={() => beginBranch()}>Add branch</button></div>
         <div className="organization-branch-list">
           {organization?.branches.map((branch) => <article className="organization-branch-row" key={branch.code}>
             <div className="organization-branch-title"><strong>{branch.name}</strong><span>{branch.code}</span></div>
@@ -183,7 +182,7 @@ export function Organization({ theme, toggleTheme }: ThemePageProps) {
       </section>
 
       <section className="organization-section">
-        <div className="organization-section-heading"><div><h2>Employee branch access</h2><p>Assign every employee to the branches where they can work.</p></div></div>
+        <div className="organization-section-heading"><div><h2>Employee branch access</h2></div></div>
         <div className="organization-access-table-wrap">
           <table className="organization-access-table"><thead><tr><th>Employee</th><th>Role</th><th>Assigned branches</th></tr></thead><tbody>
             {organization?.users.map((user) => <tr key={user.id}><td><strong>{user.username}</strong><small>{user.email}</small></td><td>{user.role === 'admin' ? 'Business administrator' : user.shopRole || 'Staff'}</td><td><div className="branch-access-options">{activeBranches.map((branch) => <label key={branch.code}><input type="checkbox" disabled={savingUserId === user.id} checked={user.branchCodes.includes(branch.code)} onChange={(event) => {
@@ -197,7 +196,7 @@ export function Organization({ theme, toggleTheme }: ThemePageProps) {
     </main>
     {isBusinessModalOpen && <div className="modal-backdrop" role="presentation">
       <section className="entry-modal organization-modal" role="dialog" aria-modal="true" aria-labelledby="business-profile-title">
-        <header className="detail-head"><div><h2 id="business-profile-title">Business profile</h2><p>Update the business identity, operating template, tax, and processing settings.</p></div><button type="button" className="modal-close" onClick={() => setIsBusinessModalOpen(false)} disabled={saving} aria-label="Close">x</button></header>
+        <header className="detail-head"><div><h2 id="business-profile-title">Business profile</h2></div><button type="button" className="modal-close" onClick={() => setIsBusinessModalOpen(false)} disabled={saving} aria-label="Close">x</button></header>
         <form className="organization-form-grid organization-modal-form" onSubmit={saveBusiness}>
           <label>Business name<input required value={businessDraft.name} onChange={(event) => setBusinessDraft({ ...businessDraft, name: event.target.value })} /></label>
           <label>Industry template<select value={businessDraft.template} onChange={(event) => setBusinessDraft({ ...businessDraft, template: event.target.value })}>{templates.map((template) => <option key={template} value={template}>{templateLabel(template)}</option>)}</select></label>
@@ -217,7 +216,7 @@ export function Organization({ theme, toggleTheme }: ThemePageProps) {
     </div>}
     {isBranchModalOpen && <div className="modal-backdrop" role="presentation">
       <section className="entry-modal organization-modal" role="dialog" aria-modal="true" aria-labelledby="branch-editor-title">
-        <header className="detail-head"><div><h2 id="branch-editor-title">{editingBranchCode ? `Edit ${editingBranchCode}` : 'New branch'}</h2><p>Set the branch details and its warehouse locations.</p></div><button type="button" className="modal-close" onClick={() => { setIsBranchModalOpen(false); setEditingBranchCode(''); setBranchDraft(EMPTY_BRANCH) }} disabled={saving} aria-label="Close">x</button></header>
+        <header className="detail-head"><div><h2 id="branch-editor-title">{editingBranchCode ? `Edit ${editingBranchCode}` : 'New branch'}</h2></div><button type="button" className="modal-close" onClick={() => { setIsBranchModalOpen(false); setEditingBranchCode(''); setBranchDraft(EMPTY_BRANCH) }} disabled={saving} aria-label="Close">x</button></header>
         <form className="organization-form-grid organization-modal-form" onSubmit={saveBranch}>
           <label>Branch name<input required value={branchDraft.name} onChange={(event) => setBranchDraft({ ...branchDraft, name: event.target.value })} /></label>
           <label>Branch code<input required disabled={Boolean(editingBranchCode)} maxLength={18} value={branchDraft.code} onChange={(event) => setBranchDraft({ ...branchDraft, code: event.target.value.toUpperCase() })} /></label>

@@ -59,7 +59,6 @@ export function Sales({
   entryMode = 'scan',
   onNewEntry,
   currency = 'RWF',
-  onOpenReport,
 }: SalesProps) {
   const [isSelling, setIsSelling] = useState(startSelling)
   const [rows, setRows] = useState<SaleRow[]>([])
@@ -480,24 +479,28 @@ export function Sales({
           <div className="list-detail-layout">
             <section className="sales-list-page page-pad list-page">
               <div className="inventory-title">
-                <div><h1>Sales & Checkout</h1><p>Review orders, carts, and checkout activity before scanning items.</p></div>
+                <div><h1>Sales</h1></div>
                 <div className="toolbar">
                   <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>From<input type="date" value={filterFrom} onChange={(event) => setFilterFrom(event.target.value)} /></label>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>To<input type="date" value={filterTo} onChange={(event) => setFilterTo(event.target.value)} /></label>
                   <button type="button" onClick={() => { setPageNumber(1); setAppliedFilterFrom(filterFrom); setAppliedFilterTo(filterTo) }}>Apply</button>
                   <button type="button" onClick={() => { setPageNumber(1); setFilterFrom(''); setFilterTo(''); setAppliedFilterFrom(''); setAppliedFilterTo('') }}>Clear</button>
                   <button type="button" onClick={handleExport}>Export CSV</button>
-                  {onOpenReport && (
-                    <button type="button" onClick={onOpenReport}>Sales Report</button>
-                  )}
                   <button type="button" onClick={() => importInputRef.current?.click()} disabled={isImporting}>
                     {isImporting ? 'Importing…' : 'Import'}
                   </button>
                   <button className="primary-action" type="button" onClick={onNewEntry ?? (() => setIsSelling(true))}>New Sale</button>
                   <input ref={importInputRef} type="file" accept=".csv,.json" hidden onChange={handleImportFile} />
+                  <ImportHelp kind="sales" />
                 </div>
               </div>
-              <ImportHelp kind="sales" />
+              <div className="inventory-stats">
+                <div><span>Orders</span><strong>{totalCount}</strong></div>
+                <div><span>Page Total</span><strong>{formatMoney(filteredSalesTotal, currency)}</strong></div>
+                <div><span>Page Items</span><strong>{filteredItemsSold}</strong></div>
+                <div><span>Given</span><strong>{rows.filter((row) => row.status === 'Given').length}</strong></div>
+                <div><span>Returned</span><strong>{rows.filter((row) => row.status === 'Returned').length}</strong></div>
+              </div>
               <div className="table-frame">
                 <table>
                   <thead><tr><th>Date</th><th>Sale ID</th><th>Item Name</th><th>Customer Name</th><th>Phone Number</th><th>Items</th><th>Net Value</th><th>Status</th></tr></thead>
@@ -522,17 +525,10 @@ export function Sales({
                 onPageSizeChange={(size) => { setPageSize(size); setPageNumber(1) }}
               />
               {importError && (
-                <div style={{ marginTop: '12px', color: importError.startsWith('Imported') ? '#1b5e20' : '#d32f2f' }}>
+                <div className={`notice ${/^(Imported|.*deleted)/i.test(importError) ? 'success' : 'error'}`}>
                   {importError}
                 </div>
               )}
-              <div className="inventory-stats">
-                <div><span>Orders</span><strong>{totalCount}</strong></div>
-                <div><span>Page Total</span><strong>{formatMoney(filteredSalesTotal, currency)}</strong></div>
-                <div><span>Page Items</span><strong>{filteredItemsSold}</strong></div>
-                <div><span>Given</span><strong>{rows.filter((row) => row.status === 'Given').length}</strong></div>
-                <div><span>Returned</span><strong>{rows.filter((row) => row.status === 'Returned').length}</strong></div>
-              </div>
             </section>
             <SaleDetailPanel
               row={selectedSale}
@@ -899,7 +895,8 @@ function SaleDetailPanel({
 }
 
 function StatusSelect({ value, onChange }: { value: string; onChange: (status: EntryStatus) => void }) {
-  const options: EntryStatus[] = ['Received', 'Returned', 'Given']
+  // Pending = credit sale with a balance still owed.
+  const options: EntryStatus[] = ['Pending', 'Given', 'Returned']
   const selected = options.includes(value as EntryStatus) ? value : 'Given'
 
   return (
@@ -986,7 +983,6 @@ function SaleItemsView({
       <div className="inventory-title">
         <div>
           <h1>Sale Items Breakdown</h1>
-          <p>Detailed view of all individual product line items sold across orders.</p>
         </div>
         <div className="toolbar">
           <button type="button" onClick={handleExportItems}>

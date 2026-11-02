@@ -282,7 +282,7 @@ export async function runCoffeeAcceptance(page, testInfo, focus) {
         localStorage.setItem('tri_active_branch_code', activeBranch)
       }, { token: session.token, activeBranch: branchCode })
       await page.goto('/')
-      await expect(page.getByText('Total Sales', { exact: true }).first()).toBeVisible()
+      await expect(page.locator('.metric-card').getByText('Sales', { exact: true }).first()).toBeVisible()
       await expect(page.getByText(/American Coffee/).first()).toBeVisible()
       const productionNavigation = page.getByRole('button', { name: /^Production/ })
       await expect(productionNavigation).toBeVisible()

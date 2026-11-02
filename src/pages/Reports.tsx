@@ -3,9 +3,7 @@ import { api, type CreditFilter, type ReportTransaction, type ReportsResponse } 
 import { Topbar } from '../components/Topbar'
 import { exportRows } from '../utils/export'
 import type { ReportScope, ThemePageProps } from '../types'
-import { jsPDF } from 'jspdf'
 
-export const page = { id: 'reports' as const, label: 'Reports', icon: 'doc' }
 
 type ReportsProps = ThemePageProps & {
   currency?: string
@@ -284,8 +282,9 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
   })
   const [error, setError] = useState('')
   const [viewScope, setViewScope] = useState<ReportScope>(reportScope)
-
-  useEffect(() => {
+  const [syncedScope, setSyncedScope] = useState<ReportScope>(reportScope)
+  if (syncedScope !== reportScope) {
+    setSyncedScope(reportScope)
     setViewScope(reportScope)
     setCreditFilter((current) => {
       if (reportScope === 'sales' && current === 'purchasesCredit') return 'all'
@@ -293,7 +292,7 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
       if (reportScope === 'expenses' && current !== 'all') return 'all'
       return current
     })
-  }, [reportScope])
+  }
 
   const creditFilterLabel =
     creditFilter === 'all'
@@ -447,11 +446,11 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
     exportRows(`TRI-LTD-${viewScope}-Report-${fromDate}-to-${toDate}.csv`, [...metaRows, ...ledgerExportRows] as Record<string, string>[])
   }
 
-  const exportReportPdf = () => {
+  const exportReportPdf = async () => {
+    const { jsPDF } = await import('jspdf')
     const title = `TRI_LTD_${viewScope}_Report_${fromDate}_to_${toDate}`
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' })
     const margin = 40
-    let y = 50
 
     doc.setFillColor(37, 99, 235)
     doc.rect(0, 0, doc.internal.pageSize.getWidth(), 86, 'F')
@@ -465,7 +464,7 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
     doc.text(`Gross and net profit use sold items only`, margin, 76)
     doc.text(`TRI LTD • ${fromDate} to ${toDate} • ${creditFilterLabel}`, margin, 48)
     doc.setTextColor(17, 24, 39)
-    y = 112
+    let y = 112
 
     // Prepare page metrics for header and tables
     const pageWidth = doc.internal.pageSize.getWidth()
@@ -672,7 +671,7 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
 
     const getRowValue = (row: LedgerRow, key: string) => {
       if (key === 'id') return formatDisplayId(row.id, row.type, row.description, row.date)
-      return String((row as any)[key] ?? '-')
+      return String((row as unknown as Record<string, unknown>)[key] ?? '-')
     }
 
     const measureRowHeight = (row: LedgerRow, widths: number[], columns: { key: string; label: string; flex: number; right: boolean }[]) => {
@@ -843,7 +842,7 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
   }
 
   const exportReportPrintable = () => {
-    exportReportPdf()
+    void exportReportPdf()
   }
 
   const renderLedgerTable = () => {
@@ -867,11 +866,6 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
       <section className="report-ledger">
         <div className="ledger-heading">
           <h2>{scopeLedgerTitles[viewScope]}</h2>
-          <p>
-            {viewScope === 'all'
-              ? 'Transactions are grouped into separate tables for easier review.'
-              : `All ${viewScope} for the selected period.`}
-          </p>
         </div>
 
         {groups.map((group) => {
@@ -982,7 +976,6 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
         <section className="report-toolbar no-print">
           <div className="report-toolbar-copy">
             <h1>{scopeLabels[viewScope]}</h1>
-            <p>Professional ledger with summary totals. Choose a report type or open from Sales, Purchases, or Expenses.</p>
           </div>
           <div className="report-toolbar-actions">
             <button type="button" className="ghost-export" onClick={exportReportPrintable}>
@@ -1041,7 +1034,6 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
               <div className="brand-info">
                 <p className="brand-eyebrow">{scopeLabels[viewScope]}</p>
                 <h1>TRI LTD</h1>
-                <p className="brand-sub">Business transaction report</p>
               </div>
             </div>
             <div className="report-meta">
@@ -1070,7 +1062,6 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
             <div className="report-hero-copy">
               <span className="report-eyebrow">Business snapshot</span>
               <h2>Clear view of performance for the selected period</h2>
-              <p>Track sales, spending, and profitability with a professional ledger summary built for faster decisions.</p>
             </div>
             <div className="report-hero-metrics">
               {reportHighlights.map((item) => (
@@ -1125,7 +1116,6 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
                       </span>
                       <h3>Net Profit</h3>
                       <strong>{reports.summary.netProfit ?? '-'}</strong>
-                      <small>Gross profit minus expenses.</small>
                     </article>
                   </div>
                 </>
@@ -1185,7 +1175,6 @@ export function Reports({ theme, toggleTheme, currency = 'RWF', reportScope = 'a
           {/* <section className="transaction-summary">
             <div className="section-title">
               <h2>Financial Summary</h2>
-              <p>Gross profit = total sales − purchase of sold items. Net profit = gross profit − all expenses for the selected period.</p>
             </div>
             <div className="table-shell">
               <table className="summary-table">

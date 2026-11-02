@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { api, type InventoryRow, type OpenShowcase, type ShowcaseClosePayload, type StockAdjustmentPayload } from '../api'
-import type { PageDefinition, PageRenderProps } from '../types'
+import type { PageRenderProps } from '../types'
 
 type AdjustmentMode = 'count' | 'quick' | 'showcase'
 
@@ -39,8 +39,8 @@ export function StockAdjustments({ setPage }: PageRenderProps) {
     api.inventory(2000)
       .then((res) => {
         setInventoryItems(res.rows || [])
-        if (res.rows && res.rows.length > 0 && !selectedSku) {
-          setSelectedSku(res.rows[0].sku)
+        if (res.rows && res.rows.length > 0) {
+          setSelectedSku((current) => current || res.rows[0].sku)
         }
       })
       .catch(() => {
@@ -129,8 +129,8 @@ export function StockAdjustments({ setPage }: PageRenderProps) {
       )
       setCountedQty('')
       setCountNotes('')
-    } catch (err: any) {
-      setMessage({ text: err.message || 'Failed to apply physical stock count.', type: 'error' })
+    } catch (err) {
+      setMessage({ text: err instanceof Error ? err.message : 'Failed to apply physical stock count.', type: 'error' })
     } finally {
       setSaving(false)
     }
@@ -180,8 +180,8 @@ export function StockAdjustments({ setPage }: PageRenderProps) {
       setQuickQty('')
       setQuickReason('')
       setQuickRef('')
-    } catch (err: any) {
-      setMessage({ text: err.message || 'Failed to adjust stock.', type: 'error' })
+    } catch (err) {
+      setMessage({ text: err instanceof Error ? err.message : 'Failed to adjust stock.', type: 'error' })
     } finally {
       setSaving(false)
     }
@@ -922,7 +922,6 @@ export function StockAdjustments({ setPage }: PageRenderProps) {
             <div className="showcase-register-heading">
               <div>
                 <h2>Items Sent to Partners</h2>
-                <p>Open showcase issues with quantities still out of stock.</p>
               </div>
               <span>{showcases.length} open {showcases.length === 1 ? 'issue' : 'issues'}</span>
             </div>
@@ -976,8 +975,3 @@ export function StockAdjustments({ setPage }: PageRenderProps) {
   )
 }
 
-export const page: Pick<PageDefinition, 'id' | 'label' | 'icon'> = {
-  id: 'stock-adjustments',
-  label: 'Adjustments',
-  icon: 'Edit3',
-}

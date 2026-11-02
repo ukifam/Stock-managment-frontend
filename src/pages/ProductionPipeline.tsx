@@ -4,6 +4,8 @@ import { Topbar } from '../components/Topbar'
 import { formatMoney } from '../utils/money'
 import type { Theme } from '../types'
 import { useAuth } from '../context/AuthContext'
+import { readStoredPipelines, writeStoredPipelines, type PipelineStorageScope } from '../utils/pipelineStorage'
+import { cleanUnitName, formatUnitQty } from '../utils/units'
 
 function isFinishedProduct(item: { itemType?: string; category?: string }) {
   const type = String(item.itemType || '').trim().toLowerCase()
@@ -37,7 +39,7 @@ export type PipelineActivityRecord = {
   timestamp: string
   summary: string
   details?: string
-  metrics?: Record<string, any>
+  metrics?: Record<string, unknown>
 }
 
 type Ingredient = {
@@ -113,7 +115,7 @@ export type PipelineData = {
   updatedAt: string
 }
 
-export const STAGES: Array<{ id: PipelineStage; label: string; icon: string; shortLabel: string }> = [
+const STAGES: Array<{ id: PipelineStage; label: string; icon: string; shortLabel: string }> = [
   { id: 'plan', label: 'Plan', icon: '📋', shortLabel: 'Plan' },
   { id: 'receive_plan', label: 'Receive Plan', icon: '📥', shortLabel: 'Review' },
   { id: 'purchase', label: 'Purchase', icon: '🛒', shortLabel: 'Buy' },
@@ -127,7 +129,7 @@ export const STAGES: Array<{ id: PipelineStage; label: string; icon: string; sho
   { id: 'analyze', label: 'Analyze', icon: '📈', shortLabel: 'Profit' },
 ]
 
-export const STAGE_ROLE_RULES: Record<
+const STAGE_ROLE_RULES: Record<
   PipelineStage,
   {
     allowedRoles: ShopRole[]
@@ -204,7 +206,7 @@ export const STAGE_ROLE_RULES: Record<
   },
 }
 
-export function canUserExecuteStage(
+function canUserExecuteStage(
   stage: PipelineStage,
   user: { role?: string; shopRole?: string } | null,
   executionMode: PipelineExecutionMode = 'delegated'
@@ -233,24 +235,11 @@ export function canUserExecuteStage(
   }
 }
 
-const STORAGE_KEY = 'tri_production_pipelines'
 const ACTIVE_PIPELINE_KEY = 'tri_active_pipeline_id'
 
 /* ──────────────────────────────── Unit Helpers ──────────────────────────────── */
 
-export function cleanUnitName(label: string): string {
-  if (!label) return 'unit'
-  return label.replace(/^1\s+/i, '').trim() || 'unit'
-}
-
-export function formatUnitQty(quantity: number, label: string): string {
-  const unit = cleanUnitName(label)
-  if (quantity === 1) return `1 ${unit}`
-  if (unit.endsWith('s')) return `${quantity.toLocaleString()} ${unit}`
-  return `${quantity.toLocaleString()} ${unit}s`
-}
-
-export function findMatchingInventoryItem(ingName: string, inventory: InventoryRow[]): InventoryRow | undefined {
+function findMatchingInventoryItem(ingName: string, inventory: InventoryRow[]): InventoryRow | undefined {
   if (!ingName || inventory.length === 0) return undefined
   const clean = ingName.toLowerCase().trim()
   const exact = inventory.find((item) => item.item.toLowerCase().trim() === clean)
@@ -444,119 +433,13 @@ function createEmptyPipeline(): PipelineData {
   }
 }
 
-function getStorageKey(user?: any) {
-  const owner = user?.ownerKey || user?.shopOwnerKey || user?.email || 'default'
-  const branch = user?.branchCode || user?.defaultBranchCode || 'MAIN'
-  return `tri_production_pipelines_${owner}_${branch}`
+
+function loadPipelines(user?: PipelineStorageScope): PipelineData[] {
+  return readStoredPipelines<PipelineData>(user)
 }
 
-export function convertServerOrderToPipeline(order: any): PipelineData {
-  const stageMap: Record<string, PipelineStage> = {
-    DRAFT: 'plan',
-    PENDING_APPROVAL: 'receive_plan',
-    APPROVED: 'purchase',
-    PLANNED: 'store_raw',
-    MATERIALS_READY: 'store_raw',
-    IN_PROGRESS: 'produce',
-    QUALITY_CHECK: 'quality_check',
-    REWORK: 'produce',
-    ON_HOLD: 'quality_check',
-    COMPLETED: 'analyze',
-    CANCELLED: 'plan',
-  }
-
-  const reqs = Array.isArray(order.requirements) ? order.requirements : []
-  const ingredients: Ingredient[] = reqs.map((req: any, idx: number) => ({
-    id: `ing-${idx + 1}-${order.id || Date.now()}`,
-    name: req.item || req.sku || 'Ingredient',
-    quantity: req.requiredQuantity ? (req.requiredQuantity / (order.plannedQuantity || 1)) : 1,
-    unit: cleanUnitName(req.unit || req.recipeUnit || 'unit'),
-    unitCost: req.unitCost || req.purchaseUnitPrice || 0,
-  }))
-
-  const targetQuantity = Number(order.plannedQuantity) || 1
-  const totalIngredients = ingredients.map((ing) => ({
-    ...ing,
-    totalQuantity: ing.quantity * targetQuantity,
-    totalCost: ing.quantity * targetQuantity * ing.unitCost,
-  }))
-
-  const totalMaterialCost = totalIngredients.reduce((sum, ing) => sum + ing.totalCost, 0)
-  const currentStage = stageMap[String(order.status).toUpperCase()] || 'plan'
-  const allStages: PipelineStage[] = ['plan', 'receive_plan', 'purchase', 'store_raw', 'produce', 'quality_check', 'finish', 'store_finished', 'sell', 'cost', 'analyze']
-  const stageIdx = allStages.indexOf(currentStage)
-  const completedStages: PipelineStage[] = stageIdx >= 0
-    ? allStages.slice(0, stageIdx + (order.status === 'COMPLETED' ? 1 : 0))
-    : ['plan']
-
-  return {
-    id: order.id || `PP-${Date.now()}`,
-    productName: order.productName || 'Batch Product',
-    businessType: 'other',
-    singleUnitLabel: cleanUnitName(order.productUnit || 'unit'),
-    ingredients: ingredients.length > 0 ? ingredients : [{ id: 'ing-1', name: 'Raw Material', quantity: 1, unit: 'unit', unitCost: 0 }],
-    targetQuantity,
-    scheduledDate: order.scheduledDate || new Date().toISOString().slice(0, 10),
-    currentStage,
-    completedStages,
-    executionMode: 'delegated',
-    activityLog: [
-      {
-        id: `act-server-${order.id}`,
-        stage: currentStage,
-        stageLabel: `Shop Record (${order.status || 'Active'})`,
-        performedBy: order.createdBy?.username || order.createdBy?.email || 'Shop Manager',
-        performedByRole: 'Shop Manager',
-        timestamp: order.createdAt || new Date().toISOString(),
-        summary: `Production order ${order.id} loaded from shop database (${targetQuantity} ${cleanUnitName(order.productUnit)}).`,
-      },
-    ],
-    totalIngredients,
-    totalMaterialCost,
-    purchasedItems: totalIngredients.map((ing) => ({
-      ingredientId: ing.id,
-      purchased: true,
-      purchasedQuantity: ing.totalQuantity,
-      actualCost: ing.totalCost,
-      surplusQuantity: 0,
-    })),
-    producedQuantity: Number(order.actualOutput) || targetQuantity,
-    productionStartTime: order.startedAt || '',
-    productionEndTime: order.completedAt || '',
-    productionNotes: order.notes || '',
-    qualityResult: order.status === 'COMPLETED' ? {
-      passed: true,
-      inspectedQuantity: targetQuantity,
-      passedQuantity: targetQuantity,
-      defectQuantity: 0,
-      notes: 'Inspection passed',
-      inspectedBy: 'Shop Manager',
-      date: order.completedAt || new Date().toISOString().slice(0, 10),
-    } : null,
-    sellingPricePerUnit: Number(order.cost?.unit) || 0,
-    sales: [],
-    rawMaterialsStored: ['IN_PROGRESS', 'QUALITY_CHECK', 'COMPLETED'].includes(order.status),
-    finishedGoodsStored: order.status === 'COMPLETED',
-    finishedGoodsLocation: 'Main Store',
-    createdAt: order.createdAt || new Date().toISOString(),
-    updatedAt: order.updatedAt || new Date().toISOString(),
-  }
-}
-
-function loadPipelines(user?: any): PipelineData[] {
-  try {
-    const key = getStorageKey(user)
-    const raw = localStorage.getItem(key) || localStorage.getItem(STORAGE_KEY)
-    return raw ? JSON.parse(raw) : []
-  } catch { return [] }
-}
-
-function savePipelines(pipelines: PipelineData[], user?: any) {
-  try {
-    const key = getStorageKey(user)
-    localStorage.setItem(key, JSON.stringify(pipelines))
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(pipelines))
-  } catch {}
+function savePipelines(pipelines: PipelineData[], user?: PipelineStorageScope) {
+  writeStoredPipelines(pipelines, user)
 }
 
 /* ──────────────────────────────── Main Component ──────────────────────────────── */
@@ -582,6 +465,8 @@ export function ProductionPipeline({ theme = 'dark', toggleTheme = () => {}, cur
   const [showCatalogModal, setShowCatalogModal] = useState(false)
   const [pendingAddProductCb, setPendingAddProductCb] = useState<((item: ItemMaster) => void) | null>(null)
   const [pendingAddIngredientCb, setPendingAddIngredientCb] = useState<((item: ItemMaster) => void) | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [openPlanModalAfterCreate, setOpenPlanModalAfterCreate] = useState(false)
 
   const refreshCatalog = useCallback(async () => {
     try {
@@ -603,7 +488,7 @@ export function ProductionPipeline({ theme = 'dark', toggleTheme = () => {}, cur
             item: r.item,
             description: r.description || '',
             category: r.category || 'General',
-            itemType: (r.itemType as any) || (isFinishedProduct(r) ? 'finished_product' : 'raw_material'),
+            itemType: (r.itemType as ItemMaster['itemType']) || (isFinishedProduct(r) ? 'finished_product' : 'raw_material'),
             baseUnit: r.baseUnit || 'piece',
             measurementAmount: Number(r.measurementAmount) || 1,
             status: r.status || 'Active',
@@ -613,8 +498,8 @@ export function ProductionPipeline({ theme = 'dark', toggleTheme = () => {}, cur
             reorderLevel: r.reorderLevel || 0,
             defaultSupplierId: '',
             supplierOptions: [],
-            purchasePrice: (r as any).purchasePrice ?? r.price ?? 0,
-            sellingPrice: (r as any).sellingPrice ?? r.price ?? 0,
+            purchasePrice: r.purchasePrice ?? r.rawPrice ?? 0,
+            sellingPrice: r.sellingPrice ?? r.rawPrice ?? 0,
             priceTiers: [],
             defaultWarehouseCode: '',
             batchTracking: false,
@@ -638,7 +523,7 @@ export function ProductionPipeline({ theme = 'dark', toggleTheme = () => {}, cur
 
       // Load saved pipelines from server (authoritative source)
       try {
-        const serverRes = await api.listPipelines().catch(() => null)
+        const serverRes = await api.listPipelines<PipelineData>().catch(() => null)
         const serverPipelines: PipelineData[] = serverRes?.pipelines || []
         if (serverPipelines.length > 0) {
           // Merge: server records are authoritative; local-only pipelines (not on server) are kept too
@@ -672,6 +557,7 @@ export function ProductionPipeline({ theme = 'dark', toggleTheme = () => {}, cur
   }, [user])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- state is only set after the request resolves
     void refreshCatalog()
   }, [refreshCatalog])
 
@@ -709,6 +595,13 @@ export function ProductionPipeline({ theme = 'dark', toggleTheme = () => {}, cur
   }, [user])
 
   const activePipeline = pipelines.find((p) => p.id === activePipelineId) || null
+  const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase()
+  const visiblePipelines = normalizedSearchQuery
+    ? pipelines.filter((pipeline) => {
+      const searchable = [pipeline.productName, pipeline.id, pipeline.businessType, pipeline.currentStage, pipeline.singleUnitLabel, pipeline.singleUnitMeasure].join(' ').toLocaleLowerCase()
+      return searchable.startsWith(normalizedSearchQuery)
+    })
+    : pipelines
 
   const persist = useCallback((updated: PipelineData[]) => {
     setPipelines(updated)
@@ -876,7 +769,7 @@ export function ProductionPipeline({ theme = 'dark', toggleTheme = () => {}, cur
 
   return (
     <>
-      <Topbar title="Production Pipeline" placeholder="Search pipelines..." theme={theme} toggleTheme={toggleTheme} />
+      <Topbar title="Production Pipeline" placeholder="Search production pipelines..." theme={theme} toggleTheme={toggleTheme} onSearchChange={setSearchQuery} />
       <main className="pipeline-page page-pad">
         {notice && <div className={`pipeline-notice ${notice.tone}`}>{notice.text}</div>}
 
@@ -892,13 +785,14 @@ export function ProductionPipeline({ theme = 'dark', toggleTheme = () => {}, cur
             onBack={goBack}
             onNotice={setNotice}
             onCreateNew={createNew}
+            initialPlanModalOpen={openPlanModalAfterCreate}
+            onPlanModalOpened={() => setOpenPlanModalAfterCreate(false)}
             onOpenPipeline={openPipeline}
             onQuickSell={(prod) => setQuickSellProduct(prod)}
             catalogProducts={catalogProducts}
             catalogIngredients={catalogIngredients}
             recordedUnits={recordedUnits}
             recipes={recipes}
-            onOpenCatalog={() => setShowCatalogModal(true)}
             onAddProduct={() => setShowAddProductModal(true)}
             onAddIngredient={(cb) => {
               if (cb) setPendingAddIngredientCb(() => cb)
@@ -907,18 +801,18 @@ export function ProductionPipeline({ theme = 'dark', toggleTheme = () => {}, cur
           />
         ) : (
           <PipelineList
-            pipelines={pipelines}
+            pipelines={visiblePipelines}
             currency={currency}
             onOpen={openPipeline}
-            onCreate={createNew}
+            onCreate={() => {
+              setOpenPlanModalAfterCreate(true)
+              createNew()
+            }}
             onDelete={deletePipeline}
             businessTemplate={businessTemplate}
             onQuickSell={(prod) => setQuickSellProduct(prod)}
             onOpenCatalog={() => setShowCatalogModal(true)}
-            onAddProduct={() => setShowAddProductModal(true)}
-            onAddIngredient={() => setShowAddIngredientModal(true)}
-            catalogProductsCount={catalogProducts.length}
-            catalogIngredientsCount={catalogIngredients.length}
+            searchQuery={searchQuery}
           />
         )}
 
@@ -1075,7 +969,7 @@ function QuickSellModal({
 
           <label className="pipeline-field">
             <span>Payment Method</span>
-            <select value={payment} onChange={(e) => setPayment(e.target.value as any)}>
+            <select value={payment} onChange={(e) => setPayment(e.target.value as typeof payment)}>
               <option value="Cash">Cash</option>
               <option value="Mobile Money">Mobile Money</option>
               <option value="Card">Card</option>
@@ -1320,7 +1214,7 @@ function AddIngredientModal({
               </label>
               <label className="pipeline-field">
                 <span>Requirement Type</span>
-                <select value={itemType} onChange={(e) => setItemType(e.target.value as any)}>
+                <select value={itemType} onChange={(e) => setItemType(e.target.value as typeof itemType)}>
                   <option value="raw_material">Raw Material / Ingredient</option>
                   <option value="packaging_material">Packaging / Container</option>
                 </select>
@@ -1521,84 +1415,38 @@ function FinishedProductsTable({
   pipelines,
   currency,
   onOpenPipeline,
-  onCreateNew,
   onSellProduct,
 }: {
   pipelines: PipelineData[]
   currency: string
   onOpenPipeline: (id: string) => void
-  onCreateNew: () => void
   onSellProduct: (prod: { pipeline: PipelineData; available: number; unitPrice: number }) => void
 }) {
-  const finishedItems = pipelines
-    .filter((p) =>
-      p.producedQuantity > 0 ||
-      p.completedStages.includes('finish') ||
-      ['finish', 'store_finished', 'sell', 'cost', 'analyze'].includes(p.currentStage)
-    )
-    .map((p) => {
-      const totalSold = p.sales.reduce((sum, s) => sum + s.quantity, 0)
-      const available = Math.max(0, (p.producedQuantity || p.targetQuantity) - totalSold)
-      const unitPrice = p.sellingPricePerUnit || 0
-      return {
-        pipeline: p,
-        totalSold,
-        available,
-        unitPrice,
-        totalValue: available * unitPrice,
-      }
-    })
+  const finishedItems = getFinishedProducts(pipelines)
 
   if (finishedItems.length === 0) return null
-
-  const totalFinishedProducts = finishedItems.length
-  const totalUnitsAvailable = finishedItems.reduce((sum, item) => sum + item.available, 0)
-  const totalStockValue = finishedItems.reduce((sum, item) => sum + item.totalValue, 0)
 
   return (
     <section className="pipeline-finished-section">
       <div className="pipeline-finished-header">
         <div>
-          <h2>🏪 Finished Products Ready to Sell</h2>
-          <p>All products that have finished production. Sell directly or plan another batch.</p>
-        </div>
-        <button className="pipeline-btn-primary" type="button" onClick={onCreateNew}>
-          <span>+</span> Plan Another Product
-        </button>
-      </div>
-
-      <div className="pipeline-finished-stats-row">
-        <div className="pipeline-stat-pill">
-          <span>Finished Products:</span>
-          <strong>{totalFinishedProducts} items</strong>
-        </div>
-        <div className="pipeline-stat-pill success">
-          <span>Available to Sell:</span>
-          <strong>{totalUnitsAvailable} total units</strong>
-        </div>
-        <div className="pipeline-stat-pill">
-          <span>Total Stock Value:</span>
-          <strong>{formatMoney(totalStockValue, currency)}</strong>
+          <h2>Ready to sell</h2>
         </div>
       </div>
 
-      <div className="table-frame">
+      <div className="table-frame pipeline-finished-table">
         <table>
           <thead>
             <tr>
               <th>Product</th>
-              <th>Category</th>
-              <th>Produced</th>
-              <th>Sold</th>
-              <th>Available to Sell</th>
-              <th>Unit Price</th>
-              <th>Inventory Value</th>
+              <th>Available</th>
+              <th>Stock value</th>
               <th>Status</th>
-              <th style={{ textAlign: 'right' }}>Actions</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {finishedItems.map(({ pipeline, totalSold, available, unitPrice, totalValue }) => {
+            {finishedItems.map(({ pipeline, available, unitPrice, totalValue }) => {
               const unit = cleanUnitName(pipeline.singleUnitLabel)
               const isSoldOut = available <= 0
               const isLowStock = available > 0 && available <= 10
@@ -1607,21 +1455,13 @@ function FinishedProductsTable({
                 <tr key={pipeline.id}>
                   <td>
                     <strong>{pipeline.productName || 'Untitled Product'}</strong>
-                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{pipeline.id}</div>
+                    <small>{BUSINESS_PRESETS.find((b) => b.value === pipeline.businessType)?.label || pipeline.businessType || 'General'}</small>
                   </td>
                   <td>
-                    <span className="pipeline-preset-tag">
-                      {BUSINESS_PRESETS.find((b) => b.value === pipeline.businessType)?.label || pipeline.businessType || 'General'}
-                    </span>
-                  </td>
-                  <td>{formatUnitQty(pipeline.producedQuantity, unit)}</td>
-                  <td>{formatUnitQty(totalSold, unit)}</td>
-                  <td>
-                    <strong style={{ color: isSoldOut ? '#ef4444' : isLowStock ? '#f59e0b' : '#22c55e', fontSize: '14px' }}>
+                    <strong className={isSoldOut ? 'pipeline-quantity-empty' : isLowStock ? 'pipeline-quantity-low' : 'pipeline-quantity-ready'}>
                       {formatUnitQty(available, unit)}
                     </strong>
                   </td>
-                  <td>{formatMoney(unitPrice, currency)}</td>
                   <td><strong>{formatMoney(totalValue, currency)}</strong></td>
                   <td>
                     {isSoldOut ? (
@@ -1632,8 +1472,8 @@ function FinishedProductsTable({
                       <span className="pipeline-stock-badge in-stock">Ready to Sell</span>
                     )}
                   </td>
-                  <td style={{ textAlign: 'right' }}>
-                    <div style={{ display: 'inline-flex', gap: '8px', alignItems: 'center' }}>
+                  <td>
+                    <div className="pipeline-product-actions">
                       <button
                         type="button"
                         className="pipeline-btn-sell"
@@ -1641,15 +1481,14 @@ function FinishedProductsTable({
                         onClick={() => onSellProduct({ pipeline, available, unitPrice })}
                         title={isSoldOut ? 'No stock available' : `Sell ${pipeline.productName}`}
                       >
-                        💰 Sell Now
+                        Sell
                       </button>
                       <button
                         type="button"
                         className="pipeline-btn-secondary"
-                        style={{ padding: '6px 10px', fontSize: '12px' }}
                         onClick={() => onOpenPipeline(pipeline.id)}
                       >
-                        Open Pipeline →
+                        Details
                       </button>
                     </div>
                   </td>
@@ -1663,6 +1502,21 @@ function FinishedProductsTable({
   )
 }
 
+function getFinishedProducts(pipelines: PipelineData[]) {
+  return pipelines
+    .filter((pipeline) =>
+      pipeline.producedQuantity > 0 ||
+      pipeline.completedStages.includes('finish') ||
+      ['finish', 'store_finished', 'sell', 'cost', 'analyze'].includes(pipeline.currentStage)
+    )
+    .map((pipeline) => {
+      const totalSold = pipeline.sales.reduce((sum, sale) => sum + sale.quantity, 0)
+      const available = Math.max(0, (pipeline.producedQuantity || pipeline.targetQuantity) - totalSold)
+      const unitPrice = pipeline.sellingPricePerUnit || 0
+      return { pipeline, totalSold, available, unitPrice, totalValue: available * unitPrice }
+    })
+}
+
 /* ──────────────────────────────── Pipeline List ──────────────────────────────── */
 
 function PipelineList({
@@ -1674,10 +1528,7 @@ function PipelineList({
   businessTemplate,
   onQuickSell,
   onOpenCatalog,
-  onAddProduct,
-  onAddIngredient,
-  catalogProductsCount = 0,
-  catalogIngredientsCount = 0,
+  searchQuery,
 }: {
   pipelines: PipelineData[]
   currency: string
@@ -1687,71 +1538,85 @@ function PipelineList({
   onDelete: (id: string) => void
   onQuickSell: (prod: { pipeline: PipelineData; available: number; unitPrice: number }) => void
   onOpenCatalog?: () => void
-  onAddProduct?: () => void
-  onAddIngredient?: () => void
-  catalogProductsCount?: number
-  catalogIngredientsCount?: number
+  searchQuery?: string
 }) {
   const activePipelines = pipelines.filter((p) => !p.completedStages.includes('analyze'))
   const completedPipelines = pipelines.filter((p) => p.completedStages.includes('analyze'))
+  const finishedProducts = getFinishedProducts(pipelines)
+  const availableProducts = finishedProducts.filter((item) => item.available > 0).length
+  const stockValue = finishedProducts.reduce((total, item) => total + item.totalValue, 0)
   const detectedPreset = resolvePreset(businessTemplate)
+  const hasSearch = Boolean(searchQuery?.trim())
 
   return (
     <section className="pipeline-list-section">
       <header className="pipeline-list-header">
         <div>
           <h1>Production Pipeline</h1>
-          <p>Track multiple products from recipe planning to store &amp; sales{detectedPreset ? ` • ${detectedPreset.label}` : ''}</p>
         </div>
         <div className="pipeline-header-actions">
           {onOpenCatalog && (
             <button className="pipeline-btn-secondary" type="button" onClick={onOpenCatalog}>
-              📦 Products &amp; Ingredients ({catalogProductsCount + catalogIngredientsCount})
-            </button>
-          )}
-          {onAddProduct && (
-            <button className="pipeline-btn-secondary" type="button" onClick={onAddProduct}>
-              + Add Product
-            </button>
-          )}
-          {onAddIngredient && (
-            <button className="pipeline-btn-secondary" type="button" onClick={onAddIngredient}>
-              + Add Ingredient
+              Manage catalog
             </button>
           )}
           <button className="pipeline-btn-primary" type="button" onClick={onCreate}>
-            <span>+</span> New Product Pipeline
+            <span>+</span> New production
           </button>
         </div>
       </header>
+
+      <div className="pipeline-dashboard-grid" aria-label="Production overview">
+        <article className="pipeline-dashboard-card">
+          <span>Active production</span>
+          <strong>{activePipelines.length}</strong>
+          <small>Runs in progress</small>
+        </article>
+        <article className="pipeline-dashboard-card">
+          <span>Finished products</span>
+          <strong>{finishedProducts.length}</strong>
+          <small>Production complete</small>
+        </article>
+        <article className="pipeline-dashboard-card">
+          <span>Available to sell</span>
+          <strong>{availableProducts}</strong>
+          <small>Products in stock</small>
+        </article>
+        <article className="pipeline-dashboard-card">
+          <span>Stock value</span>
+          <strong>{formatMoney(stockValue, currency)}</strong>
+          <small>At current selling prices</small>
+        </article>
+      </div>
 
       {/* Finished Products Ready for Sale Table */}
       <FinishedProductsTable
         pipelines={pipelines}
         currency={currency}
         onOpenPipeline={onOpen}
-        onCreateNew={onCreate}
         onSellProduct={onQuickSell}
       />
 
       {pipelines.length === 0 ? (
         <div className="pipeline-empty-state">
           <div className="pipeline-empty-icon">🏭</div>
-          <h2>Start your first production pipeline</h2>
+          <h2>{hasSearch ? 'No matching production pipeline' : 'Start your first production pipeline'}</h2>
           <p>
-            {detectedPreset && detectedPreset.value !== 'other'
-              ? <>Your business is set up as <strong>{detectedPreset.label}</strong>. Define what goes into 1 {detectedPreset.unitLabel} of your product (such as tea or coffee), then tell us how many you want to produce. We will check your inventory, calculate shortages to purchase, and guide you through to selling.</>
-              : <>Define what goes into a single unit of your product (1 cup of tea, 1 loaf of bread, 1 kg of flour), then tell us how many you want to produce. We'll check inventory shortages and guide you from planning to sales.</>
+            {hasSearch
+              ? <>No pipeline matches “{searchQuery}”.</>
+              : <>Recipe for one unit → quantity → we check stock and guide you to selling.</>
             }
           </p>
-          {detectedPreset && detectedPreset.value !== 'other' && (
+          {!hasSearch && detectedPreset && detectedPreset.value !== 'other' && (
             <div className="pipeline-business-preview">
               <span className="pipeline-preset-tag">{detectedPreset.label}</span>
             </div>
           )}
-          <button className="pipeline-btn-primary pipeline-btn-lg" type="button" onClick={onCreate}>
-            Create your first pipeline
-          </button>
+          {!hasSearch && (
+            <button className="pipeline-btn-primary pipeline-btn-lg" type="button" onClick={onCreate}>
+              Create your first pipeline
+            </button>
+          )}
         </div>
       ) : (
         <>
@@ -1834,7 +1699,6 @@ function PipelineCard({ pipeline, currency, onOpen, onDelete }: {
 
 function StageRoleBanner({
   stage,
-  executionMode = 'delegated',
   user,
 }: {
   stage: PipelineStage
@@ -1844,50 +1708,27 @@ function StageRoleBanner({
   const rule = STAGE_ROLE_RULES[stage]
   if (!rule) return null
 
-  const auth = canUserExecuteStage(stage, user, executionMode)
+  const auth = canUserExecuteStage(stage, user)
   const isAdmin = user?.role === 'admin' || user?.role === 'system_admin'
-  const userRoleDisplay = user?.shopRole ? user.shopRole.replace(/_/g, ' ') : (user?.role || 'Staff')
 
   return (
     <div className="pipeline-stage-role-banner">
-      <div className="pipeline-role-top">
-        <div className="pipeline-role-tag">
-          <span>{rule.icon}</span>
-          <span>Responsible Role:</span>
-          <span className="role-badge">{rule.primaryRoleName}</span>
-        </div>
-
-        <div
-          className={`pipeline-auth-status ${
-            isAdmin ? 'admin' : auth.allowed ? 'authorized' : 'restricted'
-          }`}
-        >
-          {isAdmin ? (
-            <>👑 Shop Administrator (Supervising)</>
-          ) : auth.allowed ? (
-            <>✅ Authorized ({user?.username} · {userRoleDisplay})</>
-          ) : (
-            <>⚠️ Restricted Access (Signed in as {userRoleDisplay})</>
-          )}
-        </div>
+    <div className="pipeline-role-top">
+      <div className="pipeline-role-tag">
+        <span>{rule.icon}</span>
+        <span className="role-badge">{rule.primaryRoleName}</span>
       </div>
 
-      <p className="pipeline-role-desc">
-        {rule.description}. {executionMode === 'delegated' ? 'Delegated to assigned operational department role.' : 'Directly executed under Solo Admin mode.'}
-      </p>
-
-      <div className="pipeline-role-alert-notice">
-        <span>📧</span>
-        <span>
-          <strong>Admin Alert Active:</strong> Executing actions on this stage immediately registers an in-app notification and sends an email report to the shop administrator.
-        </span>
+      <div className={`pipeline-auth-status ${isAdmin ? 'admin' : auth.allowed ? 'authorized' : 'restricted'}`}>
+        {isAdmin ? 'Administrator' : auth.allowed ? 'Authorized' : 'Restricted'}
       </div>
+    </div>
 
-      {!auth.allowed && (
-        <div style={{ color: '#ef4444', fontSize: '12px', fontWeight: 600, marginTop: '2px' }}>
-          {auth.reason}
-        </div>
-      )}
+    {!auth.allowed && (
+      <div className="pipeline-role-denied">
+        {auth.reason}
+      </div>
+    )}
     </div>
   )
 }
@@ -1990,13 +1831,14 @@ function PipelineWorkspace({
   onNotice,
   businessTemplate,
   onCreateNew,
+  initialPlanModalOpen = false,
+  onPlanModalOpened,
   onOpenPipeline,
   onQuickSell,
   catalogProducts = [],
   catalogIngredients = [],
   recordedUnits = [],
   recipes = [],
-  onOpenCatalog,
   onAddProduct,
   onAddIngredient,
 }: {
@@ -2010,13 +1852,14 @@ function PipelineWorkspace({
   onNotice: (notice: { tone: 'success' | 'error' | 'info'; text: string }) => void
   businessTemplate: string
   onCreateNew: () => void
+  initialPlanModalOpen?: boolean
+  onPlanModalOpened?: () => void
   onOpenPipeline: (id: string) => void
   onQuickSell: (prod: { pipeline: PipelineData; available: number; unitPrice: number }) => void
   catalogProducts?: ItemMaster[]
   catalogIngredients?: ItemMaster[]
   recordedUnits?: string[]
   recipes?: ProductionRecipe[]
-  onOpenCatalog?: () => void
   onAddProduct?: () => void
   onAddIngredient?: (callback?: (newItem: ItemMaster) => void) => void
 }) {
@@ -2030,6 +1873,11 @@ function PipelineWorkspace({
   const currentIdx = visibleStages.findIndex((s) => s.id === pipeline.currentStage)
   const [showFinishedDrawer, setShowFinishedDrawer] = useState(false)
   const [showAuditModal, setShowAuditModal] = useState(false)
+  const [showNewPlanModal, setShowNewPlanModal] = useState(initialPlanModalOpen)
+
+  useEffect(() => {
+    if (initialPlanModalOpen) onPlanModalOpened?.()
+  }, [initialPlanModalOpen, onPlanModalOpened])
 
   useEffect(() => {
     if (pipeline.currentStage !== 'store_raw' || !noRawMaterialsToStore) return
@@ -2050,89 +1898,58 @@ function PipelineWorkspace({
   return (
     <div className="pipeline-workspace">
       <header className="pipeline-ws-header">
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <button className="pipeline-btn-back" type="button" onClick={onBack}>← All Pipelines</button>
-          <button className="pipeline-btn-secondary" type="button" onClick={onCreateNew}>
-            <span>+</span> Plan Another Product
-          </button>
-          {onOpenCatalog && (
-            <button className="pipeline-btn-secondary" type="button" onClick={onOpenCatalog}>
-              📦 Products &amp; Ingredients
+        <div className="pipeline-ws-actions">
+          <button className="pipeline-btn-back" type="button" onClick={onBack}>← All pipelines</button>
+          <div className="pipeline-ws-secondary-actions">
+            {finishedCount > 0 && (
+              <button className="pipeline-icon-action" type="button" onClick={() => setShowFinishedDrawer((prev) => !prev)}>
+                Finished stock ({finishedCount})
+              </button>
+            )}
+            <button className="pipeline-icon-action" type="button" onClick={() => setShowAuditModal(true)}>
+              Activity ({pipeline.activityLog?.length || 0})
             </button>
-          )}
-          {onAddProduct && (
-            <button className="pipeline-btn-secondary" type="button" onClick={onAddProduct}>
-              + Add Product
-            </button>
-          )}
-          {onAddIngredient && (
-            <button className="pipeline-btn-secondary" type="button" onClick={() => onAddIngredient()}>
-              + Add Ingredient
-            </button>
-          )}
-          {finishedCount > 0 && (
-            <button
-              className="pipeline-btn-secondary"
-              type="button"
-              onClick={() => setShowFinishedDrawer((prev) => !prev)}
-              style={{ background: showFinishedDrawer ? 'rgba(99,102,241,0.15)' : undefined }}
-            >
-              🏪 Finished Stock ({finishedCount})
-            </button>
-          )}
-          <button
-            className="pipeline-btn-secondary"
-            type="button"
-            onClick={() => setShowAuditModal(true)}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-          >
-            📜 Activities &amp; Alerts Log ({pipeline.activityLog?.length || 0})
-          </button>
+          </div>
         </div>
         <div className="pipeline-ws-title">
-          <h1>{pipeline.productName || 'New Pipeline'}</h1>
-          <span className="pipeline-ws-id">{pipeline.id}</span>
+          <div>
+            <span className="pipeline-ws-kicker">Production pipeline</span>
+            <h1>{pipeline.productName || 'New pipeline'}</h1>
+          </div>
+          <button
+            className="pipeline-btn-primary"
+            type="button"
+            onClick={() => {
+              onCreateNew()
+              setShowNewPlanModal(true)
+            }}
+          >
+            New plan
+          </button>
         </div>
       </header>
 
-      {/* Workflow Execution Mode Selection */}
-      <div className="pipeline-mode-card">
-        <div className="pipeline-mode-info">
-          <span className="pipeline-mode-icon">{pipeline.executionMode === 'solo' ? '👑' : '👥'}</span>
-          <div>
-            <strong>Operational Workflow: {pipeline.executionMode === 'solo' ? 'All Processes (Solo Admin)' : 'Plan Only (Team Workflow)'}</strong>
-            <p>
-              {pipeline.executionMode === 'solo'
-                ? 'Shop administrator manages and executes all production steps directly without delegating.'
-                : 'Admin configures the plan; operational processes are assigned to worker roles with automated admin email & notification alerts.'}
-            </p>
-          </div>
-        </div>
-        {isAdmin && (
+      {isAdmin && (
+        <div className="pipeline-mode-card pipeline-mode-card-compact" aria-label="Workflow mode">
+          <span>Workflow</span>
           <div className="pipeline-mode-switch-actions">
             <button
               type="button"
               className={`pipeline-mode-btn ${pipeline.executionMode !== 'solo' ? 'active' : ''}`}
-              onClick={() => {
-                onUpdate({ ...pipeline, executionMode: 'delegated' })
-                onNotice({ tone: 'info', text: 'Switched to Team Workflow: stages assigned to operational roles with admin alerts.' })
-              }}
+              onClick={() => onUpdate({ ...pipeline, executionMode: 'delegated' })}
             >
-              👥 Team Workflow
+              Team
             </button>
             <button
               type="button"
               className={`pipeline-mode-btn ${pipeline.executionMode === 'solo' ? 'active' : ''}`}
-              onClick={() => {
-                onUpdate({ ...pipeline, executionMode: 'solo' })
-                onNotice({ tone: 'info', text: 'Switched to Solo Admin: shop admin executes all processes directly.' })
-              }}
+              onClick={() => onUpdate({ ...pipeline, executionMode: 'solo' })}
             >
-              👑 Solo Admin
+              Solo
             </button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Finished Products Drawer / Section if toggled */}
       {showFinishedDrawer && (
@@ -2141,7 +1958,6 @@ function PipelineWorkspace({
             pipelines={allPipelines}
             currency={currency}
             onOpenPipeline={(id) => { setShowFinishedDrawer(false); onOpenPipeline(id) }}
-            onCreateNew={onCreateNew}
             onSellProduct={onQuickSell}
           />
         </div>
@@ -2181,20 +1997,37 @@ function PipelineWorkspace({
         )}
 
         {pipeline.currentStage === 'plan' && (
-          <PlanStage
-            pipeline={pipeline}
-            currency={currency}
-            onUpdate={onUpdate}
-            onAdvance={onAdvance}
-            onNotice={onNotice}
-            businessTemplate={businessTemplate}
-            catalogProducts={catalogProducts}
-            catalogIngredients={catalogIngredients}
-            recordedUnits={recordedUnits}
-            recipes={recipes}
-            onOpenAddProduct={onAddProduct}
-            onOpenAddIngredient={onAddIngredient}
-          />
+          showNewPlanModal ? (
+            <div className="pipeline-modal-backdrop" role="presentation" onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setShowNewPlanModal(false)
+            }}>
+              <PlanStage
+                pipeline={pipeline}
+                currency={currency}
+                onUpdate={onUpdate}
+                onAdvance={(updated) => {
+                  setShowNewPlanModal(false)
+                  onAdvance(updated)
+                }}
+                onNotice={onNotice}
+                businessTemplate={businessTemplate}
+                catalogProducts={catalogProducts}
+                catalogIngredients={catalogIngredients}
+                recordedUnits={recordedUnits}
+                recipes={recipes}
+                onOpenAddProduct={onAddProduct}
+                onOpenAddIngredient={onAddIngredient}
+                isModal
+                onClose={() => setShowNewPlanModal(false)}
+              />
+            </div>
+          ) : (
+            <PlanOverview
+              pipeline={pipeline}
+              currency={currency}
+              onEdit={() => setShowNewPlanModal(true)}
+            />
+          )
         )}
         {pipeline.currentStage === 'receive_plan' && (
           <ReceivePlanStage pipeline={pipeline} currency={currency} onAdvance={onAdvance} onGoBack={() => onGoToStage(pipeline, 'plan')} />
@@ -2204,7 +2037,7 @@ function PipelineWorkspace({
         )}
         {pipeline.currentStage === 'store_raw' && (
           noRawMaterialsToStore
-            ? <p className="pipeline-auto-detect-banner">All required materials are already in stock. Skipping storage confirmation and moving to production.</p>
+            ? <p className="pipeline-auto-detect-banner">All materials in stock — storage step skipped.</p>
             : <StoreRawStage pipeline={pipeline} onUpdate={onUpdate} onAdvance={onAdvance} />
         )}
         {pipeline.currentStage === 'produce' && (
@@ -2253,6 +2086,62 @@ function PipelineWorkspace({
 /* ──────────────────────────── Stage Components ──────────────────────────── */
 
 /* ─── 1. PLAN ─── */
+function PlanOverview({
+  pipeline,
+  currency,
+  onEdit,
+}: {
+  pipeline: PipelineData
+  currency: string
+  onEdit: () => void
+}) {
+  const materialCost = pipeline.totalIngredients.reduce((sum, item) => sum + item.totalCost, 0)
+  const expectedRevenue = pipeline.sellingPricePerUnit * pipeline.targetQuantity
+
+  return (
+    <div className="pipeline-stage-card pipeline-plan-overview">
+      <div className="pipeline-plan-overview-head">
+        <div>
+          <span className="pipeline-stage-badge">Step 1 of 11</span>
+          <h2>Production plan</h2>
+        </div>
+        <button type="button" className="pipeline-btn-secondary" onClick={onEdit}>Edit plan</button>
+      </div>
+
+      <div className="pipeline-plan-overview-grid">
+        <div>
+          <span>Product</span>
+          <strong>{pipeline.productName || 'Not set'}</strong>
+        </div>
+        <div>
+          <span>Production</span>
+          <strong>{pipeline.targetQuantity || 0} {cleanUnitName(pipeline.singleUnitLabel)}</strong>
+        </div>
+        <div>
+          <span>Materials</span>
+          <strong>{pipeline.ingredients.length} items</strong>
+        </div>
+        <div>
+          <span>Material cost</span>
+          <strong>{formatMoney(materialCost, currency)}</strong>
+        </div>
+        <div>
+          <span>Planned date</span>
+          <strong>{pipeline.scheduledDate || 'Not set'}</strong>
+        </div>
+        <div>
+          <span>Expected revenue</span>
+          <strong>{formatMoney(expectedRevenue, currency)}</strong>
+        </div>
+      </div>
+
+      <button type="button" className="pipeline-btn-primary" onClick={() => onEdit()}>
+        Continue editing plan
+      </button>
+    </div>
+  )
+}
+
 function PlanStage({
   pipeline,
   currency,
@@ -2266,6 +2155,8 @@ function PlanStage({
   recipes = [],
   onOpenAddProduct,
   onOpenAddIngredient,
+  isModal = false,
+  onClose,
 }: {
   pipeline: PipelineData
   currency: string
@@ -2279,6 +2170,8 @@ function PlanStage({
   recipes?: ProductionRecipe[]
   onOpenAddProduct?: () => void
   onOpenAddIngredient?: (callback?: (newItem: ItemMaster) => void) => void
+  isModal?: boolean
+  onClose?: () => void
 }) {
   const detectedPreset = resolvePreset(businessTemplate)
   const defaultUnits = ['piece', 'kg', 'g', 'litre', 'ml', 'cup', 'plate', 'box', 'bag', 'hour', 'batch', 'unit']
@@ -2308,13 +2201,11 @@ function PlanStage({
   const [scheduledDate, setScheduledDate] = useState(pipeline.scheduledDate || new Date().toISOString().slice(0, 10))
   const [sellingPrice, setSellingPrice] = useState(pipeline.sellingPricePerUnit)
 
-  // Sync product selection if catalog loads or changes
-  useEffect(() => {
-    if (pipeline.productName && !selectedProductSku && catalogProducts.length > 0) {
-      const match = catalogProducts.find((p) => p.item.toLowerCase() === pipeline.productName.toLowerCase())
-      setSelectedProductSku(match ? match.sku : '__custom__')
-    }
-  }, [catalogProducts, pipeline.productName, selectedProductSku])
+  // Match the saved product once the catalog has loaded.
+  if (pipeline.productName && !selectedProductSku && catalogProducts.length > 0) {
+    const match = catalogProducts.find((p) => p.item.toLowerCase() === pipeline.productName.toLowerCase())
+    setSelectedProductSku(match ? match.sku : '__custom__')
+  }
 
   const handleProductSelect = (sku: string) => {
     setSelectedProductSku(sku)
@@ -2445,28 +2336,32 @@ function PlanStage({
   }
 
   return (
-    <div className="pipeline-stage-card">
-      <div className="pipeline-stage-header">
-        <span className="pipeline-stage-badge">Step 1 of 11</span>
-        <h2>📋 Production Plan</h2>
-        <p>Define the single-item recipe, materials &amp; packaging. Select from recorded shop products and ingredients, or add new ones.</p>
+    <div className={`pipeline-stage-card ${isModal ? 'pipeline-plan-modal-card' : ''}`}>
+      <div className="pipeline-stage-header pipeline-plan-modal-header">
+        <div>
+          <span className="pipeline-stage-badge">Step 1 of 11</span>
+          <h2>Production plan</h2>
+        </div>
+        {isModal && onClose && (
+          <button type="button" className="pipeline-modal-close" onClick={onClose} aria-label="Close new plan">×</button>
+        )}
       </div>
 
       <form className="pipeline-form" onSubmit={handleSubmit}>
         {detectedPreset && detectedPreset.value !== 'other' && (
           <div className="pipeline-auto-detect-banner">
             <span>{detectedPreset.label}</span>
-            <small>Business type detected from settings. Enter your recipe per 1 {cleanUnitName(singleUnitLabel)} below.</small>
+            <small>Recipe per 1 {cleanUnitName(singleUnitLabel)}</small>
           </div>
         )}
 
         <div className="pipeline-form-row">
           <label className="pipeline-field">
             <div className="pipeline-field-label-row">
-              <span>Select Recorded Product</span>
+              <span>Recorded product</span>
               {onOpenAddProduct && (
                 <button type="button" className="pipeline-link-btn" onClick={onOpenAddProduct}>
-                  + Add Product to Catalog
+                  Add product
                 </button>
               )}
             </div>
@@ -2543,10 +2438,8 @@ function PlanStage({
 
         {/* Single Item Recipe */}
         <fieldset className="pipeline-fieldset">
-          <legend>Recipe &amp; Materials for 1 {cleanUnitName(singleUnitLabel)}</legend>
-          <p className="pipeline-field-desc">
-            Enter all ingredients, packaging, and materials needed to make just <strong>one single {cleanUnitName(singleUnitLabel)}</strong>. Select from recorded ingredients below.
-          </p>
+          <legend>Recipe for 1 {cleanUnitName(singleUnitLabel)}</legend>
+          
 
           <div className="pipeline-ingredients-table">
             <div className="pipeline-ing-header">
@@ -2754,7 +2647,7 @@ function ReceivePlanStage({ pipeline, currency, onAdvance, onGoBack }: {
   useEffect(() => {
     let active = true
     api.inventory(1000)
-      .then((res) => { if (active) setInventory(res.rows || (res as any).items || []) })
+      .then((res) => { if (active) setInventory(res.rows || []) })
       .catch(() => {})
     return () => { active = false }
   }, [])
@@ -2771,11 +2664,16 @@ function ReceivePlanStage({ pipeline, currency, onAdvance, onGoBack }: {
   const shortageCount = stockAssessment.filter((s) => s.shortage > 0).length
 
   return (
-    <div className="pipeline-stage-card">
-      <div className="pipeline-stage-header">
-        <span className="pipeline-stage-badge">Step 2 of 11</span>
-        <h2>📥 Receive & Review Plan</h2>
-        <p>Review the calculated production plan for <strong>{pipeline.productName}</strong>.</p>
+    <div className="pipeline-stage-card pipeline-review-card">
+      <div className="pipeline-stage-header pipeline-review-header">
+        <div>
+          <span className="pipeline-stage-badge">Step 2 of 11</span>
+          <h2>Plan review</h2>
+        </div>
+        <div className="pipeline-review-status">
+          <span className="pipeline-shortage-badge ok">{inStockCount} available</span>
+          {shortageCount > 0 && <span className="pipeline-shortage-badge short">{shortageCount} shortage</span>}
+        </div>
       </div>
 
       <div className="pipeline-plan-summary">
@@ -2819,27 +2717,11 @@ function ReceivePlanStage({ pipeline, currency, onAdvance, onGoBack }: {
         </div>
       </div>
 
-      {/* Inventory Stock Assessment Banner */}
-      <div className="pipeline-inventory-check-box">
-        <div className="pipeline-inventory-check-header">
-          <h3>📦 Warehouse Inventory Readiness Check</h3>
-          <div>
-            <span className="pipeline-shortage-badge ok">{inStockCount} in stock</span>
-            {shortageCount > 0 && (
-              <span className="pipeline-shortage-badge short" style={{ marginLeft: '6px' }}>{shortageCount} shortages to buy</span>
-            )}
-          </div>
-        </div>
-        <p style={{ fontSize: '13px', color: 'var(--text-soft)', margin: '0 0 12px' }}>
-          {shortageCount === 0
-            ? '✅ All required materials are already available in your store stock. No purchases needed!'
-            : `⚠️ You need to purchase ${shortageCount} materials before production. Stock shortages will be calculated in Step 3.`
-          }
-        </p>
-      </div>
-
       <div className="pipeline-requirements-table">
-        <h3>Total Materials Required for Batch</h3>
+        <div className="pipeline-review-section-title">
+          <h3>Materials</h3>
+          <span>{pipeline.totalIngredients.length} items</span>
+        </div>
         <div className="table-frame">
           <table>
             <thead>
@@ -2866,7 +2748,7 @@ function ReceivePlanStage({ pipeline, currency, onAdvance, onGoBack }: {
             </tbody>
             <tfoot>
               <tr>
-                <td colSpan={5}><strong>Total Material Budget</strong></td>
+                <td colSpan={5}><strong>Material budget</strong></td>
                 <td><strong>{formatMoney(pipeline.totalMaterialCost, currency)}</strong></td>
               </tr>
             </tfoot>
@@ -2877,7 +2759,7 @@ function ReceivePlanStage({ pipeline, currency, onAdvance, onGoBack }: {
       <div className="pipeline-form-actions">
         <button type="button" className="pipeline-btn-secondary" onClick={onGoBack}>← Edit Plan</button>
         <button type="button" className="pipeline-btn-primary pipeline-btn-lg" onClick={() => onAdvance(pipeline)}>
-          Accept Plan & Check Shortages to Purchase →
+          Continue to shortages
         </button>
       </div>
     </div>
@@ -2900,7 +2782,7 @@ function PurchaseStage({ pipeline, currency, onUpdate, onAdvance }: {
     api.inventory(1000)
       .then((res) => {
         if (active) {
-          setInventory(res.rows || (res as any).items || [])
+          setInventory(res.rows || [])
           setLoadingInv(false)
         }
       })
@@ -3090,25 +2972,29 @@ function PurchaseStage({ pipeline, currency, onUpdate, onAdvance }: {
   }
 
   return (
-    <div className="pipeline-stage-card">
-      <div className="pipeline-stage-header">
-        <span className="pipeline-stage-badge">Step 3 of 11</span>
-        <h2>🛒 Check Inventory & Purchase Shortages</h2>
-        <p>The system checks your store inventory. You can edit the purchase quantity to <strong>buy more than needed</strong> for store inventory buffer.</p>
+    <div className="pipeline-stage-card pipeline-purchase-card">
+      <div className="pipeline-stage-header pipeline-purchase-header">
+        <div>
+          <span className="pipeline-stage-badge">Step 3 of 11</span>
+          <h2>Purchase shortages</h2>
+        </div>
+        <span className={`pipeline-shortage-badge ${shortagesCount > 0 ? 'short' : 'ok'}`}>
+          {shortagesCount > 0 ? `${shortagesCount} to buy` : 'All in stock'}
+        </span>
       </div>
 
       {/* Stock Health Summary */}
       <div className="pipeline-purchase-summary">
         <div>
-          <span>Total Materials Required:</span>
-          <strong>{pipeline.totalIngredients.length} items</strong>
+          <span>Materials</span>
+          <strong>{pipeline.totalIngredients.length}</strong>
         </div>
         <div>
-          <span>Already In Stock:</span>
-          <strong style={{ color: '#22c55e' }}>{inStockCount} items</strong>
+          <span>In stock</span>
+          <strong>{inStockCount}</strong>
         </div>
         <div>
-          <span>Shortages to Purchase:</span>
+          <span>Shortages</span>
           <strong style={{ color: shortagesCount > 0 ? '#ef4444' : '#22c55e' }}>
             {shortagesCount} {shortagesCount === 1 ? 'item' : 'items'}
           </strong>
@@ -3120,26 +3006,19 @@ function PurchaseStage({ pipeline, currency, onUpdate, onAdvance }: {
           </div>
         )}
         <div>
-          <span>Total Purchase Spend:</span>
+          <span>Purchase spend</span>
           <strong style={{ color: '#22c55e' }}>{formatMoney(totalActualCost, currency)}</strong>
         </div>
       </div>
-
-      {allMaterialsInStock && (
-        <div className="pipeline-auto-detect-banner" style={{ marginBottom: '20px' }}>
-          <span>🎉 All Materials Are In Stock!</span>
-          <small>Your warehouse has sufficient stock for every ingredient and packaging item. No purchase is needed.</small>
-        </div>
-      )}
 
       {/* Actions toolbar */}
       {!allMaterialsInStock && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginBottom: '14px', flexWrap: 'wrap' }}>
           <button type="button" className="pipeline-btn-secondary" onClick={resetToExactShortages}>
-            🎯 Buy Exact Shortages
+            Exact shortages
           </button>
           <button type="button" className="pipeline-btn-secondary" onClick={fulfillInStock}>
-            ✅ Auto-fulfill In-Stock Materials
+            Fulfill in stock
           </button>
         </div>
       )}
@@ -3295,8 +3174,8 @@ function PurchaseStage({ pipeline, currency, onUpdate, onAdvance }: {
         >
           {allFulfilled
             ? allMaterialsInStock
-              ? 'All Materials In Stock — Start Production →'
-              : 'All Materials Secured — Store Materials →'
+              ? 'Start production'
+              : 'Store materials'
             : `Fulfill or check off remaining ${ingredientStatus.filter((s) => !s.isPurchased).length} items →`}
         </button>
       </div>
@@ -3323,7 +3202,6 @@ function StoreRawStage({ pipeline, onUpdate, onAdvance }: {
       <div className="pipeline-stage-header">
         <span className="pipeline-stage-badge">Step 4 of 11</span>
         <h2>📦 Store Raw Materials</h2>
-        <p>Verify all materials are safely stored and staged for production.</p>
       </div>
 
       <div className="pipeline-store-checklist">
@@ -3694,7 +3572,7 @@ function SellStage({
   const addSale = () => {
     if (newQty <= 0 || newQty > remaining) return
     const sale: SaleRecord = {
-      id: String(Date.now()),
+      id: crypto.randomUUID(),
       date: new Date().toISOString().slice(0, 10),
       quantity: newQty,
       unitPrice: newPrice,

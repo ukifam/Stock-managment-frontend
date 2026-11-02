@@ -1,6 +1,5 @@
 import { api, type InventoryRow, type ManualEntryPayload } from '../api'
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
-import { createWorker } from 'tesseract.js'
 import type { EntryMode, EntryType } from '../types'
 import { CameraScanner } from './CameraScanner'
 import { formatMoney } from '../utils/money'
@@ -52,19 +51,18 @@ export function EntryFlowModal({ initialType, currency = 'RWF', onClose, onSubmi
           <div className="detail-head">
             <div>
               <h2 id="entry-method-title">{title}</h2>
-              <p>Choose how you want to add the item first.</p>
             </div>
             <button type="button" aria-label="Close new entry modal" onClick={onClose}>x</button>
           </div>
 
           <div className="method-grid">
-            <button type="button" className="method-card" onClick={() => setMode('scan')}>
-              <span>Scan Item</span>
-              <small>Use barcode, serial, or photo scan before completing the transaction.</small>
+            <button type="button" className="method-card" onClick={() => setMode('scan')} autoFocus>
+              <span aria-hidden="true" className="method-icon">⌗</span>
+              <span>Scan</span>
             </button>
             <button type="button" className="method-card" onClick={() => setMode('manual')}>
-              <span>Add Manually</span>
-              <small>Enter item, customer or supplier, phone number, and quantity by hand.</small>
+              <span aria-hidden="true" className="method-icon">✎</span>
+              <span>Type in</span>
             </button>
           </div>
         </section>
@@ -304,7 +302,6 @@ function ManualEntryModal({ initialType, currency = 'RWF', mode, onBack, onClose
   const [type, setType] = useState<EntryType>(initialType ?? 'purchase')
   const [quantity, setQuantity] = useState(1)
   const [unitPrice, setUnitPrice] = useState(0)
-  const [inventoryPrice, setInventoryPrice] = useState(0)
   const [payment, setPayment] = useState('Cash')
   const [paidAmount, setPaidAmount] = useState('0')
   const [inventory, setInventory] = useState<InventoryRow[]>([])
@@ -322,12 +319,13 @@ function ManualEntryModal({ initialType, currency = 'RWF', mode, onBack, onClose
     }).catch(() => setInventory([]))
   }, [])
 
-  useEffect(() => {
-    if (type === 'sale' && selectedInventory) {
-      setUnitPrice(selectedInventory.rawPrice)
-      setQuantity((current) => Math.min(Math.max(current, 1), selectedInventory.rawStock))
-    }
-  }, [type, selectedInventory])
+  const applySaleInventorySelection = (nextKey: string) => {
+    const nextInventory = inStockItems.find((item) => inventoryKey(item) === nextKey)
+    if (!nextInventory) return
+    setSelectedInventoryKey(nextKey)
+    setUnitPrice(nextInventory.rawPrice)
+    setQuantity((current) => Math.min(Math.max(current, 1), nextInventory.rawStock))
+  }
 
   return (
     <div className="modal-backdrop" role="presentation">
@@ -356,7 +354,6 @@ function ManualEntryModal({ initialType, currency = 'RWF', mode, onBack, onClose
           category: saleItem?.category ?? String(form.get('category') || ''),
           quantity: String(form.get('quantity') || '1'),
           unitPrice: String(unitPrice),
-          inventoryPrice: isPurchase ? String(inventoryPrice) : undefined,
           total: String(total),
           sku: saleItem?.sku ?? String(form.get('sku') || ''),
           payment,
@@ -365,69 +362,67 @@ function ManualEntryModal({ initialType, currency = 'RWF', mode, onBack, onClose
       }}>
         <div className="detail-head">
           <div>
-            <h2>New Entry</h2>
-            <p>Manual mode selected. Add the transaction details before continuing.</p>
+            <h2>{isPurchase ? 'New purchase' : 'New sale'}</h2>
           </div>
           <button type="button" aria-label="Close new entry modal" onClick={onClose}>x</button>
         </div>
 
         {!initialType && (
-          <label>Entry Type
-            <select value={type} onChange={(event) => setType(event.target.value as EntryType)}>
-              <option value="purchase">Purchase</option>
-              <option value="sale">Sale</option>
-            </select>
-          </label>
+          <div className="segmented" role="group" aria-label="Entry type">
+            <button type="button" className={isPurchase ? 'active' : ''} onClick={() => setType('purchase')}>Purchase</button>
+            <button type="button" className={!isPurchase ? 'active' : ''} onClick={() => setType('sale')}>Sale</button>
+          </div>
         )}
 
         <div className="field-grid">
-          <label>Item Name
+          <label>Item
             {isPurchase ? (
-              <input name="item" required placeholder="Purchased item name..." />
+              <input name="item" required list="entry-inventory-items" autoComplete="off" onChange={(event) => {
+                const match = inventory.find((item) => item.item.toLowerCase() === event.target.value.trim().toLowerCase())
+                if (match) setUnitPrice(match.purchasePrice ?? match.rawPrice)
+              }} />
             ) : (
-              <select name="item" required value={selectedInventoryKey} onChange={(event) => setSelectedInventoryKey(event.target.value)}>
+              <select
+                name="item"
+                required
+                value={selectedInventoryKey}
+                onChange={(event) => applySaleInventorySelection(event.target.value)}
+              >
                 {inStockItems.map((item) => <option key={inventoryKey(item)} value={inventoryKey(item)}>{item.item} ({item.rawStock} in stock)</option>)}
               </select>
             )}
           </label>
           <label>{isPurchase ? 'Supplier' : 'Customer'}
-            <input name="contactName" required={!isPurchase} placeholder={isPurchase ? 'Supplier name...' : 'Customer name...'} />
+            <input name="contactName" required={!isPurchase} defaultValue={isPurchase ? '' : 'Walk-in'} />
           </label>
-          <label>Phone Number
-            <input name="phone" placeholder="+1 (555) 000-0000" />
-          </label>
-          <label>{isPurchase ? 'Purchase Reference' : 'Sale Reference'}
-            <input name="reference" placeholder={isPurchase ? 'PO-9281-A' : 'SO-90210-A'} />
-          </label>
-          <label>Item Category
-            {isPurchase ? (
-              <select name="category" defaultValue="Computing">
-                <option>Computing</option>
-                <option>Visual Displays</option>
-                <option>Peripherals</option>
-                <option>Imaging Gear</option>
-                <option>Drones</option>
-                <option>Uncategorized</option>
-              </select>
-            ) : (
-              <input value={selectedInventory?.category ?? ''} readOnly />
-            )}
-          </label>
-          <label>Quantity
-            <input name="quantity" type="number" min="1" max={isPurchase ? undefined : selectedInventory?.rawStock} value={quantity} onChange={(event) => setQuantity(Number(event.target.value) || 1)} />
-          </label>
-          <label>Unit Price
-            <input name="unitPrice" type="number" min="0" step="0.01" value={unitPrice} onChange={(event) => setUnitPrice(Number(event.target.value) || 0)} />
+          <label>Phone
+            <input name="phone" type="tel" />
           </label>
           {isPurchase && (
-            <label>Inventory Price
-              <input name="inventoryPrice" type="number" min="0" step="0.01" value={inventoryPrice} onChange={(event) => setInventoryPrice(Number(event.target.value) || 0)} />
+            <label>Category
+              <input name="category" list="entry-inventory-categories" autoComplete="off" />
             </label>
           )}
+          <label>Quantity
+            <input name="quantity" type="number" min="0" step="any" required max={isPurchase ? undefined : selectedInventory?.rawStock} value={quantity} onChange={(event) => setQuantity(Number(event.target.value) || 0)} />
+          </label>
+          <label>{isPurchase ? 'Unit cost' : 'Unit price'}
+            <input name="unitPrice" type="number" min="0" step="any" value={unitPrice} onChange={(event) => setUnitPrice(Number(event.target.value) || 0)} />
+          </label>
           <label>Total
-            <input name="total" value={formatMoney(total, currency)} readOnly />
+            <input name="total" value={formatMoney(total, currency)} readOnly tabIndex={-1} />
+          </label>
+          {isPurchase && (
+            <label>SKU / barcode
+              <input name="sku" autoComplete="off" />
+            </label>
+          )}
+          <label>Reference
+            <input name="reference" autoComplete="off" />
           </label>
         </div>
+        <datalist id="entry-inventory-items">{inventory.map((item) => <option key={inventoryKey(item)} value={item.item} />)}</datalist>
+        <datalist id="entry-inventory-categories">{[...new Set(inventory.map((item) => item.category).filter(Boolean))].map((category) => <option key={category} value={category} />)}</datalist>
 
         <PaymentFields
           payment={payment}
@@ -438,14 +433,9 @@ function ManualEntryModal({ initialType, currency = 'RWF', mode, onBack, onClose
           onPaidAmountChange={setPaidAmount}
         />
 
-        <label>Item Search or SKU
-          {isPurchase ? <input name="sku" placeholder="Enter SKU before continuing..." /> : <input name="sku" value={selectedInventory?.sku ?? ''} readOnly />}
-        </label>
-
         <div className="modal-actions">
           <button type="button" onClick={onBack}>Back</button>
-          <button type="button" onClick={onClose}>Cancel</button>
-          <button className="primary-action" type="submit">{isPurchase ? 'Add Purchase Manually' : 'Add Sale Manually'}</button>
+          <button className="primary-action" type="submit" disabled={!(quantity > 0)}>{isPurchase ? 'Save purchase' : 'Save sale'}</button>
         </div>
       </form>
     </div>
@@ -472,11 +462,13 @@ function PaymentFields({
   return (
     <div className="field-grid payment-fields">
       <label>
-        Payment Type
+        Payment
         <select value={payment} onChange={(event) => onPaymentChange(event.target.value)}>
           <option value="Cash">Cash</option>
+          <option value="Mobile Money">Mobile Money</option>
+          <option value="Card">Card</option>
+          <option value="Bank Transfer">Bank transfer</option>
           <option value="Credit">Credit</option>
-          <option value="Bank transfer">Bank transfer</option>
         </select>
       </label>
       {payment === 'Credit' ? (
@@ -521,6 +513,8 @@ function getBarcodeDetector() {
 }
 
 async function extractTextFromImage(file: File) {
+  // OCR is large, so it is only downloaded when someone reads an image.
+  const { createWorker } = await import('tesseract.js')
   const worker = await createWorker('eng')
   try {
     const imageSources = [file, ...await createPreparedImageBlobs(file)]

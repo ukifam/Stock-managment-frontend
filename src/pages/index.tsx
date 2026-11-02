@@ -1,476 +1,178 @@
 import { Dashboard } from './Dashboard'
-import { dashboardPage } from './dashboardPage'
-import { Inventory, page as inventoryPage } from './Inventory'
+import { Inventory } from './Inventory'
 import { InventoryControl } from './InventoryControl'
-import { inventoryControlPage } from './inventoryControlPage'
-import { Purchases, page as purchasesPage } from './Purchases'
+import { Purchases } from './Purchases'
 import { Sales } from './Sales'
-import { Expenses, page as expensesPage } from './Expenses'
-import { Loans, page as loansPage } from './Loans'
-import { Reports, page as reportsPage } from './Reports'
-import { Settings, page as settingsPage } from './Settings'
+import { Expenses } from './Expenses'
+import { Loans } from './Loans'
+import { Reports } from './Reports'
+import { Settings } from './Settings'
 import { StockMovements } from './StockMovements'
-import { stockMovementsPage } from './stockMovementsPage'
-import { StockAdjustments, page as stockAdjustmentsPage } from './StockAdjustments'
+import { StockAdjustments } from './StockAdjustments'
 import { Production } from './Production'
 import { ProductionPipeline } from './ProductionPipeline'
 import { QualityControl } from './QualityControl'
-import { productionPage } from './productionPage'
-import { Transfers, page as transfersPage } from './Transfers'
-import { SystemAdmin, page as systemAdminPage } from './SystemAdmin'
+import { Transfers } from './Transfers'
+import { SystemAdmin } from './SystemAdmin'
 import { ShopUsers } from './ShopUsers'
-import { shopUsersPage } from './shopUsersPage'
 import { AccessControl } from './AccessControl'
-import { accessControlPage } from './accessControlPage'
 import { Organization } from './Organization'
-import { organizationPage } from './organizationPage'
 import { Landing } from './Landing'
 import { Login } from './Login'
 import { Register } from './Register'
 import { ForgotPassword } from './ForgotPassword'
-import type { PageDefinition } from '../types'
+import type { Page, PageDefinition, PageRenderProps } from '../types'
 
-const salesPage = { id: 'sales' as const, label: 'Sales', icon: 'tag' }
+type TabbedPage = 'all' | 'items' | 'report'
+
+function purchasesView(page: Page, subTab: TabbedPage) {
+  return (props: PageRenderProps) => {
+    const { entryRequest, listRefreshId, setPage, setReportScope, openEntryModal } = props
+    const isEntry = entryRequest?.type === 'purchase'
+    return (
+      <Purchases
+        key={`${page}-${isEntry && page === 'purchases' ? entryRequest.id : `list-${listRefreshId}`}`}
+        page={page}
+        subTab={subTab}
+        setPage={setPage}
+        theme={props.theme}
+        toggleTheme={props.toggleTheme}
+        startAdding={isEntry}
+        entryMode={isEntry ? entryRequest.mode : 'scan'}
+        onNewEntry={() => openEntryModal('purchase')}
+        currency={props.currency}
+        onOpenReport={() => {
+          setReportScope('purchases')
+          setPage('purchases-report')
+        }}
+      />
+    )
+  }
+}
+
+function salesView(page: Page, subTab: TabbedPage) {
+  return (props: PageRenderProps) => {
+    const { entryRequest, listRefreshId, setPage, setReportScope, openEntryModal } = props
+    const isEntry = entryRequest?.type === 'sale'
+    return (
+      <Sales
+        key={`${page}-${isEntry && page === 'sales' ? entryRequest.id : `list-${listRefreshId}`}`}
+        page={page}
+        subTab={subTab}
+        setPage={setPage}
+        theme={props.theme}
+        toggleTheme={props.toggleTheme}
+        startSelling={isEntry}
+        entryMode={isEntry ? entryRequest.mode : 'scan'}
+        onNewEntry={() => openEntryModal('sale')}
+        currency={props.currency}
+        onOpenReport={() => {
+          setReportScope('sales')
+          setPage('sales-report')
+        }}
+      />
+    )
+  }
+}
+
+function expensesView(page: Page, subTab: TabbedPage) {
+  return ({ theme, toggleTheme, setPage, setReportScope, currency }: PageRenderProps) => (
+    <Expenses
+      page={page}
+      subTab={subTab}
+      setPage={setPage}
+      currency={currency}
+      theme={theme}
+      toggleTheme={toggleTheme}
+      onOpenReport={() => {
+        setReportScope('expenses')
+        setPage('expenses-report')
+      }}
+    />
+  )
+}
+
+function loansView(page: Page, subTab: 'given' | 'taken' | 'repayments') {
+  return ({ theme, toggleTheme, setPage, currency }: PageRenderProps) => (
+    <Loans page={page} subTab={subTab} setPage={setPage} currency={currency} theme={theme} toggleTheme={toggleTheme} />
+  )
+}
+
+function productionView(tab: 'planner' | 'objectives' | 'recipes' | 'processes' | 'orders' | 'procurement' | 'resources' | 'waste') {
+  return (props: PageRenderProps) => <Production {...props} tab={tab} />
+}
 
 export const pageRegistry: PageDefinition[] = [
+  { id: 'landing', label: 'Home', icon: 'home', render: ({ theme, toggleTheme, setPage }) => <Landing theme={theme} toggleTheme={toggleTheme} setPage={setPage} /> },
+  { id: 'login', label: 'Sign In', icon: 'lock', render: ({ theme, toggleTheme, setPage }) => <Login theme={theme} toggleTheme={toggleTheme} setPage={setPage} /> },
+  { id: 'register', label: 'Sign Up', icon: 'user-plus', render: ({ theme, toggleTheme, setPage }) => <Register theme={theme} toggleTheme={toggleTheme} setPage={setPage} /> },
+  { id: 'forgot-password', label: 'Reset Password', icon: 'lock', render: ({ theme, toggleTheme, setPage }) => <ForgotPassword theme={theme} toggleTheme={toggleTheme} setPage={setPage} /> },
   {
-    id: 'landing',
-    label: 'Home',
-    icon: 'home',
-    render: ({ theme, toggleTheme, setPage }) => (
-      <Landing theme={theme} toggleTheme={toggleTheme} setPage={setPage} />
+    id: 'dashboard',
+    label: 'Dashboard',
+    icon: 'grid',
+    render: ({ theme, toggleTheme, openEntryModal, activeShopName, processingEnabled, setPage, currency }) => (
+      <Dashboard theme={theme} toggleTheme={toggleTheme} onNewEntry={openEntryModal} activeShopName={activeShopName} processingEnabled={processingEnabled} setPage={setPage} currency={currency} />
     ),
   },
+  { id: 'organization', label: 'Business & Branches', icon: 'gear', render: (props) => <Organization {...props} /> },
+  { id: 'shop-users', label: 'Staff', icon: 'user', render: (props) => <ShopUsers {...props} /> },
+  { id: 'access-control', label: 'Roles & Permissions', icon: 'gear', render: (props) => <AccessControl {...props} /> },
+  { id: 'quality-control', label: 'Quality Control', icon: 'box', render: (props) => <QualityControl {...props} /> },
+
+  { id: 'inventory', label: 'Inventory', icon: 'box', render: (props) => <Inventory {...props} /> },
+  { id: 'inventory-control', label: 'Inventory Setup', icon: 'box', render: ({ theme, toggleTheme, setPage }) => <InventoryControl theme={theme} toggleTheme={toggleTheme} setPage={setPage} /> },
+  { id: 'stock-movements', label: 'Movements', icon: 'Activity', render: (props) => <StockMovements {...props} /> },
+  { id: 'stock-adjustments', label: 'Adjustments', icon: 'Edit3', render: (props) => <StockAdjustments {...props} /> },
+
+  { id: 'purchases', label: 'Purchases', icon: 'cart', render: purchasesView('purchases', 'all') },
+  { id: 'purchase-items', label: 'Purchase Items', icon: 'cart', render: purchasesView('purchase-items', 'items') },
+  { id: 'purchases-report', label: 'Purchases Report', icon: 'cart', render: purchasesView('purchases-report', 'report') },
+
+  { id: 'sales', label: 'Sales', icon: 'tag', render: salesView('sales', 'all') },
+  { id: 'sale-items', label: 'Sale Items', icon: 'tag', render: salesView('sale-items', 'items') },
+  { id: 'sales-report', label: 'Sales Report', icon: 'tag', render: salesView('sales-report', 'report') },
+
+  { id: 'expenses', label: 'Expenses', icon: 'receipt', render: expensesView('expenses', 'all') },
+  { id: 'expense-items', label: 'Expense Items', icon: 'receipt', render: expensesView('expense-items', 'items') },
+  { id: 'expenses-report', label: 'Expenses Report', icon: 'receipt', render: expensesView('expenses-report', 'report') },
+
+  { id: 'loans', label: 'Loans & Debt', icon: 'credit-card', render: loansView('loans', 'given') },
+  { id: 'loans-given', label: 'Loans Given', icon: 'credit-card', render: loansView('loans-given', 'given') },
+  { id: 'loans-taken', label: 'Loans Taken', icon: 'credit-card', render: loansView('loans-taken', 'taken') },
+  { id: 'loans-repayments', label: 'Repayments', icon: 'credit-card', render: loansView('loans-repayments', 'repayments') },
+
   {
-    id: 'login',
-    label: 'Sign In',
-    icon: 'lock',
-    render: ({ theme, toggleTheme, setPage }) => (
-      <Login theme={theme} toggleTheme={toggleTheme} setPage={setPage} />
-    ),
-  },
-  {
-    id: 'register',
-    label: 'Sign Up',
-    icon: 'user-plus',
-    render: ({ theme, toggleTheme, setPage }) => (
-      <Register theme={theme} toggleTheme={toggleTheme} setPage={setPage} />
-    ),
-  },
-  {
-    id: 'forgot-password',
-    label: 'Reset Password',
-    icon: 'lock',
-    render: ({ theme, toggleTheme, setPage }) => <ForgotPassword theme={theme} toggleTheme={toggleTheme} setPage={setPage} />,
-  },
-  {
-    ...dashboardPage,
-    render: ({ theme, toggleTheme, openEntryModal, activeShopName, processingEnabled, setPage }) => (
-      <Dashboard theme={theme} toggleTheme={toggleTheme} onNewEntry={() => openEntryModal()} activeShopName={activeShopName} processingEnabled={processingEnabled} setPage={setPage} />
-    ),
-  },
-  {
-    ...shopUsersPage,
-    render: ({ theme, toggleTheme, setPage }) => <ShopUsers theme={theme} toggleTheme={toggleTheme} setPage={setPage} />,
-  },
-  {
-    ...accessControlPage,
-    render: ({ theme, toggleTheme, setPage }) => <AccessControl theme={theme} toggleTheme={toggleTheme} setPage={setPage} />,
-  },
-  {
-    ...organizationPage,
-    render: ({ theme, toggleTheme }) => <Organization theme={theme} toggleTheme={toggleTheme} />,
-  },
-  {
-    id: 'quality-control',
-    label: 'Quality Control',
-    icon: 'box',
-    render: ({ theme, toggleTheme }) => <QualityControl theme={theme} toggleTheme={toggleTheme} />,
-  },
-  {
-    ...inventoryPage,
-    render: (props) => <Inventory {...props} />,
-  },
-  {
-    ...inventoryControlPage,
-    render: ({ theme, toggleTheme, setPage }) => <InventoryControl theme={theme} toggleTheme={toggleTheme} setPage={setPage} />,
-  },
-  // Purchases Group
-  {
-    ...purchasesPage,
-    id: 'purchases',
-    render: ({ theme, toggleTheme, entryRequest, currency, openEntryModal, listRefreshId, setPage, setReportScope }) => (
-      <Purchases
-        key={`purchase-${entryRequest?.type === 'purchase' ? entryRequest.id : `list-${listRefreshId}`}`}
-        page="purchases"
-        subTab="all"
-        setPage={setPage}
-        theme={theme}
-        toggleTheme={toggleTheme}
-        startAdding={entryRequest?.type === 'purchase'}
-        entryMode={entryRequest?.type === 'purchase' ? entryRequest.mode : 'scan'}
-        onNewEntry={() => openEntryModal('purchase')}
-        currency={currency}
-        onOpenReport={() => {
-          setReportScope('purchases')
-          setPage('purchases-report')
-        }}
-      />
-    ),
-  },
-  {
-    id: 'purchase-items',
-    label: 'Purchase Items',
-    icon: 'cart',
-    render: ({ theme, toggleTheme, entryRequest, currency, openEntryModal, listRefreshId, setPage, setReportScope }) => (
-      <Purchases
-        key={`purchase-items-${listRefreshId}`}
-        page="purchase-items"
-        subTab="items"
-        setPage={setPage}
-        theme={theme}
-        toggleTheme={toggleTheme}
-        startAdding={entryRequest?.type === 'purchase'}
-        entryMode={entryRequest?.type === 'purchase' ? entryRequest.mode : 'scan'}
-        onNewEntry={() => openEntryModal('purchase')}
-        currency={currency}
-        onOpenReport={() => {
-          setReportScope('purchases')
-          setPage('purchases-report')
-        }}
-      />
-    ),
-  },
-  {
-    id: 'purchases-report',
-    label: 'Purchases Report',
-    icon: 'cart',
-    render: ({ theme, toggleTheme, entryRequest, currency, openEntryModal, listRefreshId, setPage, setReportScope }) => (
-      <Purchases
-        key={`purchase-report-${listRefreshId}`}
-        page="purchases-report"
-        subTab="report"
-        setPage={setPage}
-        theme={theme}
-        toggleTheme={toggleTheme}
-        startAdding={entryRequest?.type === 'purchase'}
-        entryMode={entryRequest?.type === 'purchase' ? entryRequest.mode : 'scan'}
-        onNewEntry={() => openEntryModal('purchase')}
-        currency={currency}
-        onOpenReport={() => {
-          setReportScope('purchases')
-          setPage('purchases-report')
-        }}
-      />
-    ),
-  },
-  // Sales Group
-  {
-    ...salesPage,
-    id: 'sales',
-    render: ({ theme, toggleTheme, entryRequest, currency, openEntryModal, listRefreshId, setPage, setReportScope }) => (
-      <Sales
-        key={`sale-${entryRequest?.type === 'sale' ? entryRequest.id : `list-${listRefreshId}`}`}
-        page="sales"
-        subTab="all"
-        setPage={setPage}
-        theme={theme}
-        toggleTheme={toggleTheme}
-        startSelling={entryRequest?.type === 'sale'}
-        entryMode={entryRequest?.type === 'sale' ? entryRequest.mode : 'scan'}
-        onNewEntry={() => openEntryModal('sale')}
-        currency={currency}
-        onOpenReport={() => {
-          setReportScope('sales')
-          setPage('sales-report')
-        }}
-      />
-    ),
-  },
-  {
-    id: 'sale-items',
-    label: 'Sale Items',
-    icon: 'tag',
-    render: ({ theme, toggleTheme, entryRequest, currency, openEntryModal, listRefreshId, setPage, setReportScope }) => (
-      <Sales
-        key={`sale-items-${listRefreshId}`}
-        page="sale-items"
-        subTab="items"
-        setPage={setPage}
-        theme={theme}
-        toggleTheme={toggleTheme}
-        startSelling={entryRequest?.type === 'sale'}
-        entryMode={entryRequest?.type === 'sale' ? entryRequest.mode : 'scan'}
-        onNewEntry={() => openEntryModal('sale')}
-        currency={currency}
-        onOpenReport={() => {
-          setReportScope('sales')
-          setPage('sales-report')
-        }}
-      />
-    ),
-  },
-  {
-    id: 'sales-report',
-    label: 'Sales Report',
-    icon: 'tag',
-    render: ({ theme, toggleTheme, entryRequest, currency, openEntryModal, listRefreshId, setPage, setReportScope }) => (
-      <Sales
-        key={`sales-report-${listRefreshId}`}
-        page="sales-report"
-        subTab="report"
-        setPage={setPage}
-        theme={theme}
-        toggleTheme={toggleTheme}
-        startSelling={entryRequest?.type === 'sale'}
-        entryMode={entryRequest?.type === 'sale' ? entryRequest.mode : 'scan'}
-        onNewEntry={() => openEntryModal('sale')}
-        currency={currency}
-        onOpenReport={() => {
-          setReportScope('sales')
-          setPage('sales-report')
-        }}
-      />
-    ),
-  },
-  // Expenses Group
-  {
-    ...expensesPage,
-    id: 'expenses',
-    render: ({ theme, toggleTheme, setPage, setReportScope, currency }) => (
-      <Expenses
-        page="expenses"
-        subTab="all"
-        setPage={setPage}
-        currency={currency}
-        theme={theme}
-        toggleTheme={toggleTheme}
-        onOpenReport={() => {
-          setReportScope('expenses')
-          setPage('expenses-report')
-        }}
-      />
-    ),
-  },
-  {
-    id: 'expense-items',
-    label: 'Expense Items',
-    icon: 'receipt',
-    render: ({ theme, toggleTheme, setPage, setReportScope, currency }) => (
-      <Expenses
-        page="expense-items"
-        subTab="items"
-        setPage={setPage}
-        currency={currency}
-        theme={theme}
-        toggleTheme={toggleTheme}
-        onOpenReport={() => {
-          setReportScope('expenses')
-          setPage('expenses-report')
-        }}
-      />
-    ),
-  },
-  {
-    id: 'expenses-report',
-    label: 'Expenses Report',
-    icon: 'receipt',
-    render: ({ theme, toggleTheme, setPage, setReportScope, currency }) => (
-      <Expenses
-        page="expenses-report"
-        subTab="report"
-        setPage={setPage}
-        currency={currency}
-        theme={theme}
-        toggleTheme={toggleTheme}
-        onOpenReport={() => {
-          setReportScope('expenses')
-          setPage('expenses-report')
-        }}
-      />
-    ),
-  },
-  // Loans & Debt Group
-  {
-    ...loansPage,
-    id: 'loans',
-    render: ({ theme, toggleTheme, setPage, currency }) => (
-      <Loans
-        page="loans"
-        subTab="given"
-        setPage={setPage}
-        currency={currency}
-        theme={theme}
-        toggleTheme={toggleTheme}
-      />
-    ),
-  },
-  {
-    id: 'loans-given',
-    label: 'Loans Given',
-    icon: 'credit-card',
-    render: ({ theme, toggleTheme, setPage, currency }) => (
-      <Loans
-        page="loans-given"
-        subTab="given"
-        setPage={setPage}
-        currency={currency}
-        theme={theme}
-        toggleTheme={toggleTheme}
-      />
-    ),
-  },
-  {
-    id: 'loans-taken',
-    label: 'Loans Taken',
-    icon: 'credit-card',
-    render: ({ theme, toggleTheme, setPage, currency }) => (
-      <Loans
-        page="loans-taken"
-        subTab="taken"
-        setPage={setPage}
-        currency={currency}
-        theme={theme}
-        toggleTheme={toggleTheme}
-      />
-    ),
-  },
-  {
-    id: 'loans-repayments',
-    label: 'Repayments Ledger',
-    icon: 'credit-card',
-    render: ({ theme, toggleTheme, setPage, currency }) => (
-      <Loans
-        page="loans-repayments"
-        subTab="repayments"
-        setPage={setPage}
-        currency={currency}
-        theme={theme}
-        toggleTheme={toggleTheme}
-      />
-    ),
-  },
-  // General Reports
-  {
-    ...reportsPage,
+    id: 'reports',
+    label: 'Reports',
+    icon: 'doc',
     render: ({ theme, toggleTheme, currency, reportScope, setReportScope }) => (
       <Reports theme={theme} toggleTheme={toggleTheme} currency={currency} reportScope={reportScope} onReportScopeChange={setReportScope} />
     ),
   },
-  // Settings
   {
-    ...settingsPage,
-    render: ({ isLight, toggleTheme, onCurrencyChange }) => (
-      <Settings isLight={isLight} toggleTheme={toggleTheme} onCurrencyChange={onCurrencyChange} />
+    id: 'settings',
+    label: 'Settings',
+    icon: 'gear',
+    render: ({ isLight, toggleTheme, onCurrencyChange, setPage }) => (
+      <Settings isLight={isLight} toggleTheme={toggleTheme} onCurrencyChange={onCurrencyChange} setPage={setPage} />
     ),
   },
-  // Stock Movements & Adjustments
-  {
-    ...stockMovementsPage,
-    render: (props) => (
-      <StockMovements {...props} />
-    ),
-  },
-  {
-    ...stockAdjustmentsPage,
-    render: (props) => (
-      <StockAdjustments {...props} />
-    ),
-  },
-  {
-    ...productionPage,
-    render: (props) => <Production {...props} tab="planner" />,
-  },
-  {
-    id: 'production-objectives',
-    label: 'What Do I Need?',
-    icon: 'box',
-    render: (props) => <Production {...props} tab="objectives" />,
-  },
-  {
-    id: 'production-recipes',
-    label: 'Recipes & BOM',
-    icon: 'box',
-    render: (props) => <Production {...props} tab="recipes" />,
-  },
-  {
-    id: 'production-processes',
-    label: 'Production Processes',
-    icon: 'box',
-    render: (props) => <Production {...props} tab="processes" />,
-  },
-  {
-    id: 'production-orders',
-    label: 'Orders & Quality',
-    icon: 'box',
-    render: (props) => <Production {...props} tab="orders" />,
-  },
-  {
-    id: 'production-procurement',
-    label: 'Purchasing',
-    icon: 'box',
-    render: (props) => <Production {...props} tab="procurement" />,
-  },
-  {
-    id: 'production-resources',
-    label: 'Resources & Cost',
-    icon: 'box',
-    render: (props) => <Production {...props} tab="resources" />,
-  },
-  {
-    id: 'production-waste',
-    label: 'Waste & By-products',
-    icon: 'box',
-    render: (props) => <Production {...props} tab="waste" />,
-  },
-  {
-    id: 'production-pipeline',
-    label: 'Pipeline',
-    icon: 'box',
-    render: (props) => <ProductionPipeline theme={props.theme} toggleTheme={props.toggleTheme} currency={props.currency} />,
-  },
-  {
-    ...transfersPage,
-    render: (props) => <Transfers {...props} />,
-  },
-  {
-    ...systemAdminPage,
-    render: (props) => <SystemAdmin {...props} />,
-  },
-  {
-    id: 'system-admin-shops',
-    label: 'Shops',
-    icon: 'box',
-    render: (props) => <SystemAdmin {...props} />,
-  },
-  {
-    id: 'system-admin-users',
-    label: 'User Accounts',
-    icon: 'user',
-    render: (props) => <SystemAdmin {...props} />,
-  },
-  {
-    id: 'system-admin-activity',
-    label: 'Activity Log',
-    icon: 'reports',
-    render: (props) => <SystemAdmin {...props} />,
-  },
-  {
-    ...shopUsersPage,
-    render: (props) => <ShopUsers {...props} />,
-  },
-  {
-    ...accessControlPage,
-    render: (props) => <AccessControl {...props} />,
-  },
-  {
-    ...organizationPage,
-    render: (props) => <Organization {...props} />,
-  },
-  {
-    id: 'quality-control',
-    label: 'Quality Control',
-    icon: 'box',
-    render: (props) => <QualityControl {...props} />,
-  },
+
+  { id: 'production', label: 'Production', icon: 'box', render: productionView('planner') },
+  { id: 'production-objectives', label: 'What Do I Need?', icon: 'box', render: productionView('objectives') },
+  { id: 'production-recipes', label: 'Recipes & BOM', icon: 'box', render: productionView('recipes') },
+  { id: 'production-processes', label: 'Processes', icon: 'box', render: productionView('processes') },
+  { id: 'production-orders', label: 'Orders & Quality', icon: 'box', render: productionView('orders') },
+  { id: 'production-procurement', label: 'Purchasing', icon: 'box', render: productionView('procurement') },
+  { id: 'production-resources', label: 'Resources & Cost', icon: 'box', render: productionView('resources') },
+  { id: 'production-waste', label: 'Waste & By-products', icon: 'box', render: productionView('waste') },
+  { id: 'production-pipeline', label: 'Pipeline', icon: 'box', render: ({ theme, toggleTheme, currency }) => <ProductionPipeline theme={theme} toggleTheme={toggleTheme} currency={currency} /> },
+
+  { id: 'transfers', label: 'Transfers', icon: 'transfer', render: (props) => <Transfers {...props} /> },
+
+  { id: 'system-admin', label: 'System Admin', icon: 'gear', render: (props) => <SystemAdmin {...props} /> },
+  { id: 'system-admin-shops', label: 'Shops', icon: 'box', render: (props) => <SystemAdmin {...props} /> },
+  { id: 'system-admin-users', label: 'User Accounts', icon: 'user', render: (props) => <SystemAdmin {...props} /> },
+  { id: 'system-admin-activity', label: 'Activity Log', icon: 'reports', render: (props) => <SystemAdmin {...props} /> },
 ]

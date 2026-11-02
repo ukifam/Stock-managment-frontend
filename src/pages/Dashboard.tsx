@@ -1,16 +1,24 @@
 import type { CSSProperties } from 'react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Topbar } from '../components/Topbar'
 import { api, type DashboardResponse } from '../api'
 import { useAuth } from '../context/AuthContext'
-import type { Page, ThemePageProps } from '../types'
+import type { EntryType, Page, ThemePageProps } from '../types'
 
 type DashboardProps = ThemePageProps & {
-  onNewEntry?: () => void
+  onNewEntry?: (type?: EntryType) => void
   activeShopName?: string
   processingEnabled?: boolean
   setPage?: (page: Page) => void
+  currency?: string
 }
+
+const PRESETS = [
+  { label: 'Today', days: 1 },
+  { label: '7d', days: 7 },
+  { label: '30d', days: 30 },
+  { label: '90d', days: 90 },
+]
 
 export function Dashboard({ theme, toggleTheme, onNewEntry, activeShopName, processingEnabled = false, setPage }: DashboardProps) {
   const { user } = useAuth()
@@ -20,11 +28,15 @@ export function Dashboard({ theme, toggleTheme, onNewEntry, activeShopName, proc
   const [category, setCategory] = useState('')
   const [stockStatus, setStockStatus] = useState('all')
   const [error, setError] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<DashboardResponse['catalog']>([])
+  const [searching, setSearching] = useState(false)
+  const searchRequestId = useRef(0)
 
-  const isAdmin = String(user?.role || '').toLowerCase() === 'admin'
-    || String(user?.role || '').toLowerCase().replace(/[\s-]+/g, '_') === 'system_admin'
-  const canViewProduction = isAdmin
-    || Boolean(user?.permissions?.find((p) => p.module === 'production')?.actions.includes('view'))
+  const role = String(user?.role || '').toLowerCase().replace(/[\s-]+/g, '_')
+  const isAdmin = role === 'admin' || role === 'system_admin'
+  const can = (module: string) => isAdmin || Boolean(user?.permissions?.find((p) => p.module === module)?.actions.includes('view'))
+  const canCreate = (module: string) => isAdmin || Boolean(user?.permissions?.find((p) => p.module === module)?.actions.includes('create'))
 
   useEffect(() => {
     let isMounted = true
@@ -34,10 +46,40 @@ export function Dashboard({ theme, toggleTheme, onNewEntry, activeShopName, proc
         .catch(() => { if (isMounted) setError('Could not refresh dashboard data.') })
     }
     loadDashboard()
-    const refreshId = window.setInterval(loadDashboard, 5000)
+    const refreshId = window.setInterval(loadDashboard, 30000)
     window.addEventListener('focus', loadDashboard)
     return () => { isMounted = false; window.clearInterval(refreshId); window.removeEventListener('focus', loadDashboard) }
   }, [fromDate, toDate, category, stockStatus])
+
+  useEffect(() => {
+    const query = searchQuery.trim().toLocaleLowerCase()
+    const requestId = ++searchRequestId.current
+    if (!query) return
+
+    const timeoutId = window.setTimeout(() => {
+      setSearching(true)
+      api.inventory(1000)
+        .then((response) => {
+          if (requestId !== searchRequestId.current) return
+          setSearchResults(response.rows
+            .filter((item) => `${item.item} ${item.sku}`.toLocaleLowerCase().includes(query))
+            .slice(0, 12)
+            .map((item) => ({ sku: item.sku, name: item.item, type: item.category, price: item.price, visual: '' })))
+        })
+        .catch(() => { if (requestId === searchRequestId.current) setSearchResults([]) })
+        .finally(() => { if (requestId === searchRequestId.current) setSearching(false) })
+    }, 200)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [searchQuery])
+
+  const activePreset = PRESETS.find((preset) => {
+    if (!fromDate || !toDate) return false
+    const end = new Date()
+    const start = new Date(end)
+    start.setDate(start.getDate() - preset.days + 1)
+    return fromDate === formatDateInput(start) && toDate === formatDateInput(end)
+  })?.label ?? (fromDate || toDate ? 'custom' : 'All')
 
   const setDatePreset = (days: number) => {
     const end = new Date()
@@ -47,101 +89,120 @@ export function Dashboard({ theme, toggleTheme, onNewEntry, activeShopName, proc
     setToDate(formatDateInput(end))
   }
 
+  const isFiltered = Boolean(fromDate || toDate || category || stockStatus !== 'all')
   const clearFilters = () => { setFromDate(''); setToDate(''); setCategory(''); setStockStatus('all') }
+  const isSearching = Boolean(searchQuery.trim())
+  const products = isSearching ? searchResults : dashboard.catalog
+  const hasSales = dashboard.salesBars.some((height) => height > 0)
+
+  const quickActions: Array<{ label: string; icon: string; onClick: () => void; show: boolean }> = [
+    { label: 'New sale', icon: '＋', onClick: () => onNewEntry?.('sale'), show: canCreate('sales') },
+    { label: 'New purchase', icon: '＋', onClick: () => onNewEntry?.('purchase'), show: canCreate('purchases') },
+    { label: 'Expense', icon: '⊖', onClick: () => setPage?.('expenses'), show: can('expenses') },
+    { label: 'Production', icon: '⚙', onClick: () => setPage?.('production-pipeline'), show: processingEnabled && can('production') },
+    { label: 'Stock count', icon: '≡', onClick: () => setPage?.('stock-adjustments'), show: can('stock_movements') },
+    { label: 'Reports', icon: '▤', onClick: () => setPage?.('reports'), show: can('reports') },
+  ]
 
   return (
     <>
-      <Topbar title={activeShopName ? `Shop Dashboard: ${activeShopName}` : ''} placeholder="Global system search..." theme={theme} toggleTheme={toggleTheme} />
+      <Topbar
+        title={activeShopName || ''}
+        placeholder="Find a product…"
+        theme={theme}
+        toggleTheme={toggleTheme}
+        onSearchChange={setSearchQuery}
+      />
       <div className="dashboard page-pad">
-        <section className="dashboard-filters" aria-label="Dashboard filters">
-          <div className="dashboard-filter-dates">
-            <label>From<input type="date" value={fromDate} max={toDate || formatDateInput(new Date())} onChange={(e) => setFromDate(e.target.value)} /></label>
-            <label>To<input type="date" value={toDate} min={fromDate || undefined} max={formatDateInput(new Date())} onChange={(e) => setToDate(e.target.value)} /></label>
+        <section className="dash-toolbar" aria-label="Dashboard filters">
+          <div className="segmented" role="group" aria-label="Date range">
+            <button type="button" className={activePreset === 'All' ? 'active' : ''} onClick={() => { setFromDate(''); setToDate('') }}>All</button>
+            {PRESETS.map((preset) => (
+              <button key={preset.label} type="button" className={activePreset === preset.label ? 'active' : ''} onClick={() => setDatePreset(preset.days)}>{preset.label}</button>
+            ))}
           </div>
-          <div className="dashboard-filter-presets" aria-label="Date presets">
-            <button type="button" onClick={() => setDatePreset(7)}>7 days</button>
-            <button type="button" onClick={() => setDatePreset(30)}>30 days</button>
-            <button type="button" onClick={() => setDatePreset(90)}>90 days</button>
-          </div>
-          <label className="dashboard-filter-select">Category
-            <select value={category} onChange={(e) => setCategory(e.target.value)}>
-              <option value="">All categories</option>
-              {dashboard.categories.map((item) => <option key={item} value={item}>{item}</option>)}
-            </select>
-          </label>
-          <label className="dashboard-filter-select">Stock
-            <select value={stockStatus} onChange={(e) => setStockStatus(e.target.value)}>
-              <option value="all">All stock</option>
-              <option value="available">In stock</option>
-              <option value="low">Low stock</option>
-              <option value="out">Out of stock</option>
-            </select>
-          </label>
-          <button className="dashboard-filter-reset" type="button" onClick={clearFilters}>Reset</button>
+          <input type="date" aria-label="From date" value={fromDate} max={toDate || formatDateInput(new Date())} onChange={(e) => setFromDate(e.target.value)} />
+          <input type="date" aria-label="To date" value={toDate} min={fromDate || undefined} max={formatDateInput(new Date())} onChange={(e) => setToDate(e.target.value)} />
+          <select aria-label="Category" value={category} onChange={(e) => setCategory(e.target.value)}>
+            <option value="">All categories</option>
+            {dashboard.categories.map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+          <select aria-label="Stock status" value={stockStatus} onChange={(e) => setStockStatus(e.target.value)}>
+            <option value="all">All stock</option>
+            <option value="available">In stock</option>
+            <option value="low">Low stock</option>
+            <option value="out">Out of stock</option>
+          </select>
+          {isFiltered && <button className="link-button" type="button" onClick={clearFilters}>Reset</button>}
         </section>
 
-        {error && <div style={{ color: '#ff6f00', padding: '8px', marginBottom: '12px', backgroundColor: '#fff3e0', borderRadius: '4px', fontSize: '14px' }}>{error}</div>}
+        {error && <div className="notice error" role="alert">{error}</div>}
 
         <section className="metric-grid">
           {dashboard.metrics.map((metric) => (
             <article className="metric-card" key={metric.label}>
-              <div className="metric-top"><span className="chip-icon" aria-hidden="true" /><small className={metric.delta?.startsWith('-') ? 'danger' : ''}>{metric.delta}</small></div>
               <span>{metric.label}</span>
               <strong>{metric.value}</strong>
-              <div className="metric-line" />
+              {metric.delta && <small className={metric.delta.startsWith('-') ? 'danger' : ''}>{metric.delta}</small>}
             </article>
           ))}
         </section>
 
-        {processingEnabled && canViewProduction && (
-          <section className="panel" aria-label="Processing workspace" style={{ marginBottom: '1rem', padding: '1.25rem' }}>
-            <div className="panel-head">
-              <div><h2>Production &amp; processing</h2><p>Plan production, manage recipes, and track orders for this processing business.</p></div>
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem' }}>
-              <button className="ghost-button" type="button" onClick={() => setPage?.('production-pipeline')}>
-                🏭 Open Production Pipeline
-              </button>
-            </div>
-          </section>
-        )}
+        <nav className="quick-actions" aria-label="Quick actions">
+          {quickActions.filter((action) => action.show).map((action) => (
+            <button key={action.label} type="button" onClick={action.onClick}><span aria-hidden="true">{action.icon}</span>{action.label}</button>
+          ))}
+        </nav>
 
         <section className="dashboard-main">
           <article className="panel sales-panel">
-            <div className="panel-head">
-              <div><h2>Sales Activity</h2><p>Sales within the selected date range</p></div>
-            </div>
-            <div className="bar-chart" aria-label="Hourly sales chart">
-              {dashboard.salesBars.map((height, index) => <i key={`${height}-${index}`} style={{ '--h': `${height}%` } as CSSProperties} />)}
-            </div>
-            <div className="chart-times">{dashboard.salesLabels.map((label, index) => <span key={`${label}-${index}`}>{label}</span>)}</div>
+            <div className="panel-head"><h2>Sales</h2></div>
+            {hasSales ? (
+              <>
+                <div className="bar-chart" aria-label="Sales over the selected period">
+                  {dashboard.salesBars.map((height, index) => <i key={index} style={{ '--h': `${height}%` } as CSSProperties} />)}
+                </div>
+                <div className="chart-times">{dashboard.salesLabels.map((label, index) => <span key={`${label}-${index}`}>{label}</span>)}</div>
+              </>
+            ) : <div className="empty-state">No sales in this period</div>}
           </article>
 
           <article className="panel alerts-panel">
-            <div className="alert-title"><h2>Low Stock Alerts</h2><span aria-hidden="true" /></div>
-            {dashboard.lowStock.map((item) => (
-              <div className="alert-item" key={item.sku}>
-                <div><strong>{item.name}</strong><span>SKU: {item.sku}</span></div>
-                <b className={item.status.includes('Out') ? 'danger' : ''}>{item.status}</b>
-                <button type="button" className={item.action.includes('Urgent') ? 'urgent' : ''}>{item.action}</button>
-              </div>
-            ))}
-            <button className="ghost-button" type="button">View All Alerts</button>
+            <div className="panel-head">
+              <h2>Low stock <b className="count-badge">{dashboard.lowStock.length}</b></h2>
+              {can('inventory') && <button className="link-button" type="button" onClick={() => setPage?.('inventory')}>View all</button>}
+            </div>
+            <div className="alerts-list">
+              {dashboard.lowStock.length === 0 && <div className="empty-state">All stock levels are healthy</div>}
+              {dashboard.lowStock.map((item) => (
+                <div className="alert-item" key={item.sku}>
+                  <div><strong>{item.name}</strong><span>{item.sku}</span></div>
+                  <b className={item.status.includes('Out') ? 'danger' : ''}>{item.status}</b>
+                  {canCreate('purchases') && (
+                    <button type="button" className={item.action.includes('Urgent') ? 'urgent' : ''} onClick={() => onNewEntry?.('purchase')}>Reorder</button>
+                  )}
+                </div>
+              ))}
+            </div>
           </article>
         </section>
 
         <section className="catalog-section">
-          <div className="section-head"><h2>Recently Cataloged</h2><span>Sorted by: Entry Date</span></div>
+          <div className="section-head">
+            <h2>{isSearching ? 'Search results' : 'Recently added'}</h2>
+            {isSearching && <span>{searching ? 'Searching…' : `${searchResults.length} found`}</span>}
+          </div>
+          {isSearching && !searching && searchResults.length === 0 && <div className="empty-state">No products match “{searchQuery.trim()}”</div>}
           <div className="catalog-grid">
-            {dashboard.catalog.map((item) => (
+            {products.map((item) => (
               <article className="product-card" key={item.sku}>
-                <div className={`product-visual ${item.visual}`} />
-                <strong>SKU: {item.sku}</strong><span>{item.name}</span><p>{item.type} <b>{item.price}</b></p>
+                <span className="product-avatar" aria-hidden="true">{item.name.trim().charAt(0).toUpperCase() || '?'}</span>
+                <div><strong>{item.name}</strong><small>{item.type} · {item.sku}</small></div>
+                <b>{item.price}</b>
               </article>
             ))}
           </div>
         </section>
-        <button className="floating-add" type="button" aria-label="Add entry" onClick={onNewEntry}>+</button>
       </div>
     </>
   )
