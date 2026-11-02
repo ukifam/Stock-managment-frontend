@@ -9,38 +9,14 @@ import type { Page, PageRenderProps } from '../types'
 import { exportRows } from '../utils/export'
 import { normalizeCsvRow, parseCsvFile, parseJsonFile } from '../utils/import'
 import { formatMoney } from '../utils/money'
-import { cleanUnitName, formatUnitQty } from '../utils/units'
-import { readStoredPipelines, writeStoredPipelines, type PipelineStorageScope } from '../utils/pipelineStorage'
-import { useAuth } from '../context/AuthContext'
 
-/* ── Local type mirrors PipelineData (only fields we need) ── */
-type PipelineSummary = {
-  id: string
-  productName: string
-  businessType: string
-  singleUnitLabel: string
-  producedQuantity: number
-  targetQuantity: number
-  sellingPricePerUnit: number
-  sales: Array<{ id: string; quantity: number; unitPrice: number }>
-  currentStage: string
-  completedStages: string[]
-  scheduledDate: string
-}
+type StockKind = 'products' | 'materials'
 
-function loadFinishedPipelines(user?: PipelineStorageScope): PipelineSummary[] {
-  try {
-    const all = readStoredPipelines<PipelineSummary>(user)
-    return all.filter(
-      (p) =>
-        p.producedQuantity > 0 ||
-        p.completedStages?.includes('finish') ||
-        ['finish', 'store_finished', 'sell', 'cost', 'analyze'].includes(p.currentStage)
-    )
-  } catch { return [] }
-}
-
-export function Inventory({ theme = 'dark', toggleTheme = () => {}, setPage }: Partial<PageRenderProps>) {
+export function Inventory({ theme = 'dark', toggleTheme = () => {}, setPage, openEntryModal, processingEnabled = false }: Partial<PageRenderProps>) {
+  // Processing shops keep finished products apart from the materials used to make them.
+  const [kind, setKind] = useState<StockKind>('products')
+  const [kindCounts, setKindCounts] = useState<{ products: number; materials: number } | null>(null)
+  const activeKind = processingEnabled ? kind : undefined
   const [rows, setRows] = useState<InventoryRow[]>([])
   const [pageNumber, setPageNumber] = useState(1)
   const [pageSize, setPageSize] = useState(25)
@@ -56,9 +32,10 @@ export function Inventory({ theme = 'dark', toggleTheme = () => {}, setPage }: P
 
   useEffect(() => {
     let isMounted = true
-    api.inventory(pageSize, pageNumber).then((response) => {
+    api.inventory(pageSize, pageNumber, activeKind).then((response) => {
       if (!isMounted) return
       setRows(response.rows)
+      setKindCounts(response.kindCounts ?? null)
       setTotalCount(response.count)
       setTotalPages(response.totalPages ?? 0)
       setSelectedSku((current) => response.rows.some((row) => row.sku === current) ? current : response.rows[0]?.sku || '')
@@ -68,7 +45,7 @@ export function Inventory({ theme = 'dark', toggleTheme = () => {}, setPage }: P
       if (isMounted) setRows([])
     })
     return () => { isMounted = false }
-  }, [pageNumber, pageSize, listRevision])
+  }, [pageNumber, pageSize, listRevision, activeKind])
 
   const selectedRow = rows.find((row) => row.sku === selectedSku) ?? rows[0]
   const availableRows = rows.filter((row) => getStockUnits(row) > 0)
@@ -176,7 +153,7 @@ export function Inventory({ theme = 'dark', toggleTheme = () => {}, setPage }: P
       const result = await api.bulkImportInventory(payloads)
       const skippedNote = result.skipped ? ` (${result.skipped} skipped)` : ''
       setPageNumber(1)
-      const response = await api.inventory(pageSize, 1)
+      const response = await api.inventory(pageSize, 1, activeKind)
       setRows(response.rows)
       setTotalCount(response.count)
       setTotalPages(response.totalPages ?? 0)
@@ -196,21 +173,29 @@ export function Inventory({ theme = 'dark', toggleTheme = () => {}, setPage }: P
       <Topbar placeholder="Search Global Inventory..." theme={theme} toggleTheme={toggleTheme} />
       <div style={{ padding: '1rem 1.5rem 0 1.5rem' }}>
         <div className="subtabs-bar">
-          <button
-            type="button"
-            className="subtab-btn active"
-            onClick={() => setPage?.('inventory')}
-          >
-            <span className="subtab-icon">📦</span>
-            <span className="subtab-label">Products</span>
-            <span className="subtab-badge">{totalCount}</span>
-          </button>
+          {processingEnabled ? (
+            (['products', 'materials'] as StockKind[]).map((value) => (
+              <button
+                key={value}
+                type="button"
+                className={`subtab-btn ${kind === value ? 'active' : ''}`}
+                onClick={() => { setKind(value); setPageNumber(1) }}
+              >
+                <span className="subtab-label">{value === 'products' ? 'Products' : 'Materials'}</span>
+                <span className="subtab-badge">{kindCounts ? kindCounts[value] : '…'}</span>
+              </button>
+            ))
+          ) : (
+            <button type="button" className="subtab-btn active" onClick={() => setPage?.('inventory')}>
+              <span className="subtab-label">Products</span>
+              <span className="subtab-badge">{totalCount}</span>
+            </button>
+          )}
           <button
             type="button"
             className="subtab-btn"
             onClick={() => setPage?.('stock-movements')}
           >
-            <span className="subtab-icon">↕️</span>
             <span className="subtab-label">Movements</span>
           </button>
           <button
@@ -218,7 +203,6 @@ export function Inventory({ theme = 'dark', toggleTheme = () => {}, setPage }: P
             className="subtab-btn"
             onClick={() => setPage?.('stock-adjustments')}
           >
-            <span className="subtab-icon">✏️</span>
             <span className="subtab-label">Adjustments</span>
           </button>
         </div>
@@ -226,7 +210,7 @@ export function Inventory({ theme = 'dark', toggleTheme = () => {}, setPage }: P
       <div className="inventory-layout">
         <section className="inventory-content page-pad">
           <div className="inventory-title">
-            <div><h1>Products <small className="count-badge">{totalCount.toLocaleString()}</small></h1></div>
+            <div><h1>{activeKind === 'materials' ? 'Materials' : 'Products'} <small className="count-badge">{totalCount.toLocaleString()}</small></h1></div>
             <div className="toolbar">
               <button type="button" onClick={handleExport}>Export</button>
               <button type="button" onClick={() => importInputRef.current?.click()} disabled={isImporting}>
@@ -257,8 +241,6 @@ export function Inventory({ theme = 'dark', toggleTheme = () => {}, setPage }: P
               {importError}
             </div>
           )}
-          {/* Finished Products from Production Pipeline */}
-          <FinishedProductsPanel setPage={setPage} />
         </section>
         <DetailPanel
           row={selectedRow}
@@ -268,6 +250,7 @@ export function Inventory({ theme = 'dark', toggleTheme = () => {}, setPage }: P
           onFieldChange={updateInventoryForm}
           onSave={handleSaveInventory}
           onDelete={handleDeleteInventory}
+          onSell={activeKind === 'materials' || !openEntryModal ? undefined : () => openEntryModal('sale')}
           setPage={setPage}
         />
       </div>
@@ -340,6 +323,7 @@ function DetailPanel({
   onFieldChange,
   onSave,
   onDelete,
+  onSell,
   setPage,
 }: {
   row?: InventoryRow
@@ -349,16 +333,17 @@ function DetailPanel({
   onFieldChange: (field: keyof InventoryUpdatePayload, value: string) => void
   onSave: () => Promise<void>
   onDelete: () => void
+  onSell?: () => void
   setPage?: (page: Page) => void
 }) {
   return (
     <aside className="detail-panel">
-      <div className="detail-head"><h2>Inventory Details</h2><button type="button" aria-label="Close">x</button></div>
+      <div className="detail-head"><h2>Details</h2></div>
       <div className="detail-image" />
       <h2>{row?.item ?? 'No item selected'}</h2>
       <p>SKU: {row?.sku ?? '-'} - SERIAL: #{row?.serial ?? '-'}</p>
       <div className="detail-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-        <button type="button" className="primary" disabled={!row}>Sell Item</button>
+        {onSell && <button type="button" className="primary" disabled={!row} onClick={onSell}>Sell</button>}
         <button type="button" onClick={onEditToggle} disabled={!row}>{isEditing ? 'Cancel' : 'Edit Item'}</button>
         {setPage && (
           <>
@@ -455,396 +440,5 @@ function DetailPanel({
         </>
       )}
     </aside>
-  )
-}
-
-/* ─────────────────────────────────────────────────────────────────────────────
-   Finished Products Panel — shows production pipeline output inside Inventory
-───────────────────────────────────────────────────────────────────────────── */
-
-type QuickSellState = {
-  pipeline: PipelineSummary
-  available: number
-  unitPrice: number
-} | null
-
-function FinishedProductsPanel({ setPage }: { setPage?: (page: Page) => void }) {
-  const { user } = useAuth()
-  const [items, setItems] = useState<PipelineSummary[]>(() => loadFinishedPipelines(user))
-  const [quickSell, setQuickSell] = useState<QuickSellState>(null)
-  const [notice, setNotice] = useState('')
-
-  // Reload whenever the window regains focus (user may have just done pipeline work)
-  useEffect(() => {
-    const onFocus = () => setItems(loadFinishedPipelines(user))
-    window.addEventListener('focus', onFocus)
-    return () => window.removeEventListener('focus', onFocus)
-  }, [user])
-
-  useEffect(() => {
-    if (notice) {
-      const t = setTimeout(() => setNotice(''), 4000)
-      return () => clearTimeout(t)
-    }
-  }, [notice])
-
-  if (items.length === 0) return null
-
-  const enriched = items.map((p) => {
-    const totalSold = (p.sales ?? []).reduce((s, r) => s + r.quantity, 0)
-    const available = Math.max(0, (p.producedQuantity || p.targetQuantity) - totalSold)
-    const unitPrice = p.sellingPricePerUnit || 0
-    return { p, totalSold, available, unitPrice, value: available * unitPrice }
-  })
-
-  const totalValue = enriched.reduce((s, e) => s + e.value, 0)
-  const totalUnits = enriched.reduce((s, e) => s + e.available, 0)
-
-  const handleConfirmSale = (
-    pipeline: PipelineSummary,
-    qty: number,
-    unitPrice: number,
-    customer: string,
-    payment: string,
-  ) => {
-    // Persist sale into the pipeline data in localStorage
-    const saleId = `PS-${Date.now()}`
-    const saleDate = new Date().toISOString()
-
-    try {
-      const all = readStoredPipelines<PipelineSummary & { id: string }>(user)
-      if (all.length) {
-        const updated = all.map((p) => {
-          if (p.id !== pipeline.id) return p
-          return {
-            ...p,
-            sales: [
-              ...(p.sales ?? []),
-              { id: saleId, date: saleDate, quantity: qty, unitPrice, customer, payment },
-            ],
-            updatedAt: saleDate,
-          }
-        })
-        writeStoredPipelines(updated, user)
-      }
-    } catch { /* ignore */ }
-
-    // Sync to backend POS (non-blocking)
-    api.createPosSale({
-      id: saleId,
-      date: saleDate.slice(0, 10),
-      customer: customer || 'Walk-in',
-      payment: (payment || 'Cash') as 'Cash' | 'Card' | 'Mobile Money' | 'Credit',
-      source: 'pipeline',
-      allowFlexibleStock: true,
-      items: [{
-        sku: pipeline.id,
-        item: pipeline.productName,
-        quantity: qty,
-        unitPrice,
-        unit: cleanUnitName(pipeline.singleUnitLabel),
-      }],
-    }).catch(() => {})
-
-    setNotice(
-      `Sold ${formatUnitQty(qty, pipeline.singleUnitLabel)} of ${pipeline.productName} for ${formatMoney(qty * unitPrice)}!`,
-    )
-    setQuickSell(null)
-    setItems(loadFinishedPipelines(user))
-  }
-
-  return (
-    <section style={{ marginTop: '32px' }}>
-      {/* Section Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '14px' }}>
-        <div>
-          <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}>
-            🏪 Finished Products
-            <span style={{ marginLeft: '8px', fontSize: '12px', fontWeight: 500, opacity: 0.55 }}>
-              — from Production Pipeline
-            </span>
-          </h2>
-          <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--text-soft, #94a3b8)' }}>
-            {enriched.length} product{enriched.length !== 1 ? 's' : ''} ·{' '}
-            {totalUnits} units available ·{' '}
-            Total value {formatMoney(totalValue)}
-          </p>
-        </div>
-        {setPage && (
-          <button
-            type="button"
-            onClick={() => setPage('production-pipeline')}
-            style={{
-              padding: '7px 14px',
-              borderRadius: '8px',
-              border: '1px solid rgba(99,102,241,0.3)',
-              background: 'rgba(99,102,241,0.1)',
-              color: '#a5b4fc',
-              fontSize: '13px',
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            ⚙️ Open Production Pipeline
-          </button>
-        )}
-      </div>
-
-      {notice && (
-        <div
-          style={{
-            marginBottom: '10px',
-            padding: '10px 14px',
-            borderRadius: '8px',
-            background: 'rgba(34,197,94,0.12)',
-            color: '#4ade80',
-            border: '1px solid rgba(34,197,94,0.2)',
-            fontSize: '13px',
-          }}
-        >
-          ✅ {notice}
-        </div>
-      )}
-
-      <div className="table-frame">
-        <table>
-          <thead>
-            <tr>
-              <th>Product</th>
-              <th>Unit</th>
-              <th>Produced</th>
-              <th>Sold</th>
-              <th>Available</th>
-              <th>Selling Price</th>
-              <th>Stock Value</th>
-              <th>Status</th>
-              <th style={{ textAlign: 'right' }}>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {enriched.map(({ p, totalSold, available, unitPrice, value }) => {
-              const unit = cleanUnitName(p.singleUnitLabel)
-              const isSoldOut = available <= 0
-              const isLow = available > 0 && available <= 10
-              return (
-                <tr key={p.id}>
-                  <td>
-                    <strong>{p.productName || 'Untitled'}</strong>
-                    <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted, #64748b)' }}>
-                      {p.id}
-                    </span>
-                  </td>
-                  <td style={{ fontSize: '12px', color: 'var(--text-soft, #94a3b8)' }}>{unit}</td>
-                  <td>{formatUnitQty(p.producedQuantity || p.targetQuantity, unit)}</td>
-                  <td style={{ color: totalSold > 0 ? '#f59e0b' : 'inherit' }}>
-                    {formatUnitQty(totalSold, unit)}
-                  </td>
-                  <td>
-                    <strong
-                      style={{
-                        color: isSoldOut ? '#ef4444' : isLow ? '#f59e0b' : '#22c55e',
-                        fontSize: '14px',
-                      }}
-                    >
-                      {formatUnitQty(available, unit)}
-                    </strong>
-                  </td>
-                  <td>
-                    {unitPrice > 0
-                      ? formatMoney(unitPrice)
-                      : <span style={{ color: 'var(--text-muted)' }}>—</span>}
-                  </td>
-                  <td><strong>{value > 0 ? formatMoney(value) : '—'}</strong></td>
-                  <td>
-                    {isSoldOut ? (
-                      <i className="status danger">Sold Out</i>
-                    ) : isLow ? (
-                      <i className="status low">Low Stock</i>
-                    ) : (
-                      <i className="status">Ready</i>
-                    )}
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    <button
-                      type="button"
-                      className="primary"
-                      disabled={isSoldOut || unitPrice <= 0}
-                      onClick={() => setQuickSell({ pipeline: p, available, unitPrice })}
-                      style={{ padding: '5px 12px', fontSize: '12px', opacity: isSoldOut ? 0.5 : 1 }}
-                      title={
-                        isSoldOut
-                          ? 'No stock left'
-                          : unitPrice <= 0
-                            ? 'Set a selling price in the pipeline first'
-                            : `Sell ${p.productName}`
-                      }
-                    >
-                      💰 Sell
-                    </button>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      {quickSell && (
-        <InvQuickSellModal
-          pipeline={quickSell.pipeline}
-          available={quickSell.available}
-          unitPrice={quickSell.unitPrice}
-          onClose={() => setQuickSell(null)}
-          onConfirm={handleConfirmSale}
-        />
-      )}
-    </section>
-  )
-}
-
-/* ── Inline Quick-Sell Modal for Inventory page ── */
-function InvQuickSellModal({
-  pipeline,
-  available,
-  unitPrice: defaultPrice,
-  onClose,
-  onConfirm,
-}: {
-  pipeline: PipelineSummary
-  available: number
-  unitPrice: number
-  onClose: () => void
-  onConfirm: (pipeline: PipelineSummary, qty: number, unitPrice: number, customer: string, payment: string) => void
-}) {
-  const [qty, setQty] = useState(1)
-  const [price, setPrice] = useState(defaultPrice)
-  const [customer, setCustomer] = useState('')
-  const [payment, setPayment] = useState('Cash')
-  const unit = cleanUnitName(pipeline.singleUnitLabel)
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (qty <= 0 || qty > available) return
-    onConfirm(pipeline, qty, price, customer, payment)
-  }
-
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0,0,0,0.6)',
-        zIndex: 1000,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '20px',
-      }}
-      onClick={onClose}
-    >
-      <div
-        style={{
-          background: 'var(--surface, #1e293b)',
-          borderRadius: '14px',
-          border: '1px solid var(--line, rgba(255,255,255,0.1))',
-          padding: '24px',
-          width: '100%',
-          maxWidth: '440px',
-          boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
-          <h3 style={{ margin: 0, fontSize: '16px' }}>💰 Sell — {pipeline.productName}</h3>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '18px', opacity: 0.7 }}
-          >
-            ✕
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit}>
-          <div
-            style={{
-              background: 'rgba(99,102,241,0.08)',
-              borderRadius: '8px',
-              padding: '10px 14px',
-              marginBottom: '16px',
-              display: 'flex',
-              justifyContent: 'space-between',
-            }}
-          >
-            <span style={{ fontSize: '13px', color: 'var(--text-soft)' }}>Available:</span>
-            <strong style={{ color: '#22c55e' }}>{formatUnitQty(available, unit)}</strong>
-          </div>
-
-          <div className="field-grid" style={{ display: 'grid', gap: '12px' }}>
-            <label>
-              Quantity ({unit}s)
-              <input
-                type="number"
-                min="1"
-                max={available}
-                value={qty}
-                onChange={(e) => setQty(Math.max(1, Math.min(available, Number(e.target.value))))}
-                required
-              />
-            </label>
-            <label>
-              Unit Price
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={price}
-                onChange={(e) => setPrice(Number(e.target.value))}
-                required
-              />
-            </label>
-            <label>
-              Customer (optional)
-              <input
-                type="text"
-                placeholder="Walk-in"
-                value={customer}
-                onChange={(e) => setCustomer(e.target.value)}
-              />
-            </label>
-            <label>
-              Payment Method
-              <select value={payment} onChange={(e) => setPayment(e.target.value)}>
-                <option>Cash</option>
-                <option>Mobile Money</option>
-                <option>Card</option>
-                <option>Credit</option>
-              </select>
-            </label>
-          </div>
-
-          <div
-            style={{
-              background: 'rgba(34,197,94,0.08)',
-              borderRadius: '8px',
-              padding: '10px 14px',
-              margin: '16px 0',
-              display: 'flex',
-              justifyContent: 'space-between',
-            }}
-          >
-            <span style={{ fontSize: '13px', color: 'var(--text-soft)' }}>Total Sale:</span>
-            <strong style={{ color: '#22c55e', fontSize: '16px' }}>{formatMoney(qty * price)}</strong>
-          </div>
-
-          <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-            <button type="button" onClick={onClose}>Cancel</button>
-            <button type="submit" className="primary-action">
-              Confirm Sale ({formatMoney(qty * price)})
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
   )
 }

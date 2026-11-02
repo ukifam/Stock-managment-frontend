@@ -1513,7 +1513,9 @@ export const api = {
     const query = params.toString()
     return request<DashboardResponse>(`/dashboard${query ? `?${query}` : ''}`)
   },
-  inventory: (limit = 1000, page = 1) => request<ListResponse<InventoryRow>>(`/inventory?page=${encodeURIComponent(String(page))}&limit=${encodeURIComponent(String(limit))}`),
+  inventory: (limit = 1000, page = 1, kind?: 'products' | 'materials') => request<ListResponse<InventoryRow> & { kindCounts?: { products: number; materials: number } }>(
+    `/inventory?page=${encodeURIComponent(String(page))}&limit=${encodeURIComponent(String(limit))}${kind ? `&kind=${kind}` : ''}`,
+  ),
   productionOverview: () => request<ProductionOverview>('/production'),
   qualityOverview: () => request<QualityOverview>('/quality'),
   createQualityStandard: (payload: Omit<QualityStandard, '_id' | 'active' | 'createdAt'> & { active?: boolean }) => request<QualityStandard>('/quality/standards', {
@@ -1865,6 +1867,11 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ pipelines }),
   }),
+  pipelineStep: <T = unknown>(id: string, step: string, body: Record<string, unknown> = {}) => request<{ pipeline: T }>(`/pipelines/${encodeURIComponent(id)}/${step}`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  }),
+  pipelineStockCheck: <T = unknown>(id: string) => request<{ lines: T[] }>(`/pipelines/${encodeURIComponent(id)}/stock-check`),
   deletePipelineFromServer: (id: string) => request<{ deleted: boolean; id: string }>(`/pipelines/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   }),

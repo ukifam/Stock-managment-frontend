@@ -16,6 +16,7 @@ export type AppNotification = {
   read: boolean
   targetPage?: Page
   actionLabel?: string
+  pipelineId?: string
 }
 
 const STORAGE_READ_KEY = 'tri_read_notifications_v1'
@@ -129,8 +130,10 @@ export function NotificationsPopover() {
               severity: item.severity || 'info',
               timestamp: new Date(item.createdAt),
               read: item.read,
-              targetPage: item.targetPage,
-              actionLabel: item.actionLabel || 'View Pipeline',
+              // Older notifications used "pipeline", which is not a page id.
+              targetPage: String(item.targetPage) === 'pipeline' ? 'production-pipeline' : item.targetPage,
+              actionLabel: item.actionLabel || 'Open',
+              pipelineId: typeof item.metadata?.pipelineId === 'string' ? item.metadata.pipelineId : undefined,
             })
           })
         }
@@ -259,6 +262,9 @@ export function NotificationsPopover() {
   const handleAction = (item: AppNotification) => {
     markAsRead(item.id)
     setIsOpen(false)
+    if (item.pipelineId) {
+      try { localStorage.setItem('tri_active_pipeline_id', item.pipelineId) } catch { /* storage unavailable */ }
+    }
     if (item.targetPage) {
       window.dispatchEvent(new CustomEvent(GLOBAL_SEARCH_NAVIGATION_EVENT, { detail: { page: item.targetPage } }))
     }

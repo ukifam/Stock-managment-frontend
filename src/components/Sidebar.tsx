@@ -65,9 +65,6 @@ const NAV_GROUPS: NavGroup[] = [
     processingOnly: true,
     items: [
       { id: 'production-pipeline', label: 'Pipeline' },
-      { id: 'production-recipes', label: 'Recipes' },
-      { id: 'production-orders', label: 'Orders' },
-      { id: 'quality-control', label: 'Quality' },
     ],
   },
   {
@@ -137,6 +134,21 @@ export function Sidebar({ page, setPage, onNewEntry, processingEnabled = false }
 
         {visibleGroups.map((group) => {
           const isOpen = openGroupId === group.id
+          const items = visibleItems(group)
+          // A group with a single page is just a link.
+          if (items.length === 1) {
+            return (
+              <button
+                key={group.id}
+                type="button"
+                className={group.pages.includes(page) ? 'active' : ''}
+                onClick={() => setPage(items[0].id)}
+              >
+                <span className={`nav-icon ${group.iconClass}`} aria-hidden="true" />
+                {group.label}
+              </button>
+            )
+          }
           return (
             <div key={group.id} className="nav-group-container">
               <button
@@ -151,7 +163,7 @@ export function Sidebar({ page, setPage, onNewEntry, processingEnabled = false }
               </button>
               {isOpen && (
                 <div className="nav-sub-group">
-                  {visibleItems(group).map((item) => (
+                  {items.map((item) => (
                     <button
                       key={item.id}
                       className={`nav-sub-item ${page === item.id ? 'active' : ''}`}
